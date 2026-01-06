@@ -401,9 +401,10 @@ local function openLocker(locationKey, locationData)
             description = 'Access your personal storage',
             icon = 'box',
             onSelect = function()
+                local playerData = exports.qbx_core:GetPlayerData()
                 local stashId = ('restaurant_locker_%s_%s'):format(
                     locationKey,
-                    QBX.PlayerData.citizenid
+                    playerData and playerData.citizenid or 'unknown'
                 )
                 exports.ox_inventory:openInventory('stash', stashId)
             end,
