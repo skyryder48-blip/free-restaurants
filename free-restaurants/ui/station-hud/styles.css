@@ -1,0 +1,387 @@
+/*
+    Station HUD Styles
+    Clean, modern, minimal design
+    Positioned bottom-center of screen
+*/
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+}
+
+/* ============================================================================
+   MAIN CONTAINER
+   ============================================================================ */
+
+.station-hud {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+}
+
+.station-hud.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.station-hud.hidden {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+}
+
+/* ============================================================================
+   STATION HEADER
+   ============================================================================ */
+
+.station-header {
+    background: rgba(20, 20, 25, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.station-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #f5a623;
+    font-size: 16px;
+}
+
+.station-name {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* ============================================================================
+   SLOTS CONTAINER
+   ============================================================================ */
+
+.slots-container {
+    display: flex;
+    gap: 8px;
+    background: rgba(20, 20, 25, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 12px 16px;
+}
+
+/* ============================================================================
+   INDIVIDUAL SLOT
+   ============================================================================ */
+
+.slot {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    background: rgba(40, 40, 50, 0.8);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    overflow: hidden;
+}
+
+.slot-number {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Slot States */
+.slot.empty {
+    border-color: rgba(100, 100, 110, 0.4);
+}
+
+.slot.empty .slot-icon {
+    color: rgba(100, 100, 110, 0.5);
+}
+
+.slot.preparing {
+    border-color: #4a90d9;
+    background: rgba(74, 144, 217, 0.15);
+}
+
+.slot.preparing .slot-icon {
+    color: #4a90d9;
+}
+
+.slot.cooking {
+    border-color: #f5a623;
+    background: rgba(245, 166, 35, 0.15);
+    animation: pulse-cooking 2s ease-in-out infinite;
+}
+
+.slot.cooking .slot-icon {
+    color: #f5a623;
+}
+
+.slot.ready {
+    border-color: #7ed321;
+    background: rgba(126, 211, 33, 0.15);
+    box-shadow: 0 0 12px rgba(126, 211, 33, 0.3);
+}
+
+.slot.ready .slot-icon {
+    color: #7ed321;
+}
+
+.slot.warning {
+    border-color: #f5a623;
+    background: rgba(245, 166, 35, 0.2);
+    animation: pulse-warning 0.5s ease-in-out infinite;
+}
+
+.slot.warning .slot-icon {
+    color: #f5a623;
+}
+
+.slot.burnt {
+    border-color: #d0021b;
+    background: rgba(208, 2, 27, 0.2);
+    animation: shake 0.5s ease-in-out infinite;
+}
+
+.slot.burnt .slot-icon {
+    color: #d0021b;
+}
+
+.slot.occupied {
+    border-color: #9b9b9b;
+    background: rgba(155, 155, 155, 0.1);
+}
+
+.slot.occupied .slot-icon {
+    color: #9b9b9b;
+}
+
+/* ============================================================================
+   SLOT ICON
+   ============================================================================ */
+
+.slot-icon {
+    font-size: 20px;
+    transition: color 0.3s ease;
+}
+
+/* ============================================================================
+   PROGRESS RING
+   ============================================================================ */
+
+.progress-ring {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.progress-ring svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.progress-ring-bg {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.1);
+    stroke-width: 3;
+}
+
+.progress-ring-fill {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.3s ease;
+}
+
+.slot.cooking .progress-ring-fill {
+    stroke: #f5a623;
+}
+
+.slot.ready .progress-ring-fill {
+    stroke: #7ed321;
+}
+
+.slot.warning .progress-ring-fill {
+    stroke: #f5a623;
+}
+
+/* ============================================================================
+   TIMER DISPLAY
+   ============================================================================ */
+
+.slot-timer {
+    position: absolute;
+    bottom: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================================================
+   PLAYER NAME (for occupied slots)
+   ============================================================================ */
+
+.slot-player {
+    position: absolute;
+    bottom: -18px;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    max-width: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ============================================================================
+   ANIMATIONS
+   ============================================================================ */
+
+@keyframes pulse-cooking {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(245, 166, 35, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 12px 4px rgba(245, 166, 35, 0.2);
+    }
+}
+
+@keyframes pulse-warning {
+    0%, 100% {
+        box-shadow: 0 0 8px rgba(245, 166, 35, 0.6);
+        transform: scale(1);
+    }
+    50% {
+        box-shadow: 0 0 16px rgba(245, 166, 35, 0.8);
+        transform: scale(1.02);
+    }
+}
+
+@keyframes shake {
+    0%, 100% {
+        transform: translateX(0);
+    }
+    25% {
+        transform: translateX(-2px);
+    }
+    75% {
+        transform: translateX(2px);
+    }
+}
+
+@keyframes glow-ready {
+    0%, 100% {
+        box-shadow: 0 0 8px rgba(126, 211, 33, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 16px rgba(126, 211, 33, 0.6);
+    }
+}
+
+/* ============================================================================
+   QUALITY INDICATOR
+   ============================================================================ */
+
+.quality-indicator {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.3);
+}
+
+.quality-indicator.excellent {
+    background: #22c55e;
+}
+
+.quality-indicator.good {
+    background: #84cc16;
+}
+
+.quality-indicator.average {
+    background: #eab308;
+}
+
+.quality-indicator.poor {
+    background: #f97316;
+}
+
+.quality-indicator.terrible {
+    background: #ef4444;
+}
+
+/* ============================================================================
+   CLOSE HINT
+   ============================================================================ */
+
+.close-hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 4px;
+}
+
+.close-hint kbd {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: inherit;
+    font-size: 10px;
+}
+
+/* ============================================================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================================================ */
+
+@media (max-width: 600px) {
+    .slot {
+        width: 48px;
+        height: 48px;
+    }
+    
+    .station-header {
+        padding: 6px 12px;
+    }
+    
+    .station-name {
+        font-size: 12px;
+    }
+}
