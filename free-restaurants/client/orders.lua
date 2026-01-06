@@ -130,8 +130,9 @@ local function claimOrder(orderId)
     local success = lib.callback.await('free-restaurants:server:claimOrder', false, orderId)
     
     if success then
+        local playerData = exports.qbx_core:GetPlayerData()
         updateOrderStatus(orderId, ORDER_STATUS.IN_PROGRESS, {
-            claimedBy = QBX.PlayerData.citizenid,
+            claimedBy = playerData and playerData.citizenid,
             claimedAt = GetGameTimer(),
         })
         

@@ -227,7 +227,8 @@ function onEnterRestaurant(locationKey, locationData)
     TriggerEvent('free-restaurants:client:enteredRestaurant', locationKey, locationData)
     
     -- Show notification for employees
-    local playerJob = QBX.PlayerData.job
+    local playerData = exports.qbx_core:GetPlayerData()
+    local playerJob = playerData and playerData.job
     if playerJob and playerJob.name == locationData.job then
         if not getPlayerState('isOnDuty') then
             lib.notify({
