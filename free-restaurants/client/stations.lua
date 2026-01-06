@@ -923,9 +923,9 @@ end
 ---@param capacity number Number of slots
 local function showStationHUD(stationKey, stationType, capacity)
     if hudVisible then return end
-    
+
     hudVisible = true
-    
+
     SendNUIMessage({
         type = 'showStationHUD',
         data = {
@@ -935,16 +935,31 @@ local function showStationHUD(stationKey, stationType, capacity)
             slots = stationSlots[stationKey] or {},
         },
     })
-    
-    -- Note: We don't SetNuiFocus here - HUD is display only
+
+    -- Start thread to listen for ESC key to close HUD
+    CreateThread(function()
+        while hudVisible do
+            Wait(0)
+            -- ESC key (CANCEL control / key code 322)
+            if IsControlJustPressed(0, 322) then
+                hideStationHUD()
+                break
+            end
+            -- Also close with Backspace (177)
+            if IsControlJustPressed(0, 177) then
+                hideStationHUD()
+                break
+            end
+        end
+    end)
 end
 
 --- Hide the station HUD
 local function hideStationHUD()
     if not hudVisible then return end
-    
+
     hudVisible = false
-    
+
     SendNUIMessage({
         type = 'hideStationHUD',
     })
@@ -1188,24 +1203,56 @@ local function onStationSlotSelected(locationKey, stationKey, slotIndex, station
     lib.showContext('station_recipe_select')
 end
 
+--- Check if a recipe can use a specific station type
+---@param recipe table
+---@param stationType string
+---@return boolean
+local function recipeUsesStation(recipe, stationType)
+    if not recipe.stations then return false end
+
+    for _, stationStep in ipairs(recipe.stations) do
+        if stationStep.type == stationType then
+            return true
+        end
+    end
+
+    return false
+end
+
 --- Get available recipes for a station type
 ---@param stationType string
 ---@return table recipes
 local function getAvailableRecipes(stationType)
     local recipes = {}
-    
-    for recipeId, recipe in pairs(Config.Recipes) do
-        if recipe.station == stationType or 
-           (type(recipe.station) == 'table' and FreeRestaurants.Utils.TableContains(recipe.station, stationType)) then
+
+    -- Recipes are stored in Config.Recipes.Items
+    local recipeItems = Config.Recipes and Config.Recipes.Items or {}
+
+    for recipeId, recipe in pairs(recipeItems) do
+        if recipeUsesStation(recipe, stationType) then
             -- Check level requirements
-            local playerLevel = FreeRestaurants.Client.GetPlayerState('cookingLevel') or 0
+            local playerLevel = FreeRestaurants.Client.GetPlayerState('cookingLevel') or 1
             if not recipe.levelRequired or playerLevel >= recipe.levelRequired then
-                recipe.id = recipeId
-                table.insert(recipes, recipe)
+                -- Create a copy with ID attached
+                local recipeCopy = {}
+                for k, v in pairs(recipe) do
+                    recipeCopy[k] = v
+                end
+                recipeCopy.id = recipeId
+
+                -- Calculate total cook time from all station steps
+                local totalTime = 0
+                for _, step in ipairs(recipe.stations) do
+                    totalTime = totalTime + (step.duration or 5000)
+                end
+                recipeCopy.cookTime = totalTime
+
+                table.insert(recipes, recipeCopy)
             end
         end
     end
-    
+
+    FreeRestaurants.Utils.Debug(('Found %d recipes for station type: %s'):format(#recipes, stationType))
     return recipes
 end
 
@@ -1214,14 +1261,22 @@ end
 ---@return boolean canCraft
 ---@return string? reason
 local function canCraftRecipe(recipe)
-    -- Check ingredients via ox_inventory
-    for item, amount in pairs(recipe.ingredients) do
-        local count = exports.ox_inventory:Search('count', item)
-        if count < amount then
-            return false, ('Missing: %s (need %d)'):format(item, amount)
+    if not recipe.ingredients then
+        return true, nil
+    end
+
+    -- Ingredients are stored as array: { { item = 'name', count = 1 }, ... }
+    for _, ingredient in ipairs(recipe.ingredients) do
+        local itemName = ingredient.item
+        local requiredCount = ingredient.count or 1
+
+        local playerCount = exports.ox_inventory:Search('count', itemName)
+        if playerCount < requiredCount then
+            local label = ingredient.label or itemName
+            return false, ('Missing: %s (need %d)'):format(label, requiredCount)
         end
     end
-    
+
     return true, nil
 end
 
