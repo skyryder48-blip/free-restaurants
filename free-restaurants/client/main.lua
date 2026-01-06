@@ -27,6 +27,13 @@ local blips = {}
 local currentLocation = nil         -- Current restaurant location key
 local currentLocationData = nil     -- Full location data table
 
+-- Helper function to count table entries
+local function tableSize(tbl)
+    local count = 0
+    for _ in pairs(tbl) do count = count + 1 end
+    return count
+end
+
 -- Player state stored in statebags for cross-script access
 -- Access via: LocalPlayer.state.freeRestaurants
 
@@ -198,7 +205,7 @@ local function initializeZones()
         end
     end
     
-    FreeRestaurants.Utils.Debug(('Initialized %d restaurant zones'):format(lib.table.size(zones)))
+    FreeRestaurants.Utils.Debug(('Initialized %d restaurant zones'):format(tableSize(zones)))
 end
 
 -- ============================================================================
