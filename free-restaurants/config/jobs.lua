@@ -390,7 +390,103 @@ Config.Jobs = {
             },
         },
     },
-    
+
+    --[[
+        TACO FARMER
+        Taco restaurant - Mexican cuisine
+    ]]
+    ['tacofarmer'] = {
+        label = 'Taco Farmer',
+        type = 'mexican',
+        defaultDuty = false,
+        offDutyPay = false,
+
+        grades = {
+            [0] = {
+                name = 'trainee',
+                label = 'Trainee',
+                payment = 50,
+                permissions = {
+                    canCook = true,
+                    canServe = true,
+                    canClean = true,
+                    canAccessStorage = false,
+                    canManageOrders = false,
+                    canHire = false,
+                    canFire = false,
+                    canSetWages = false,
+                    canAccessFinances = false,
+                    canEditMenu = false,
+                    canOrderStock = false,
+                },
+            },
+            [1] = {
+                name = 'cook',
+                label = 'Cook',
+                payment = 75,
+                permissions = {
+                    canCook = true,
+                    canServe = true,
+                    canClean = true,
+                    canAccessStorage = true,
+                    canManageOrders = false,
+                    canHire = false,
+                    canFire = false,
+                    canSetWages = false,
+                    canAccessFinances = false,
+                    canEditMenu = false,
+                    canOrderStock = false,
+                },
+            },
+            [2] = {
+                name = 'chef',
+                label = 'Head Cook',
+                payment = 100,
+                permissions = {
+                    canCook = true,
+                    canServe = true,
+                    canClean = true,
+                    canAccessStorage = true,
+                    canManageOrders = true,
+                    canHire = false,
+                    canFire = false,
+                    canSetWages = false,
+                    canAccessFinances = false,
+                    canEditMenu = false,
+                    canOrderStock = true,
+                },
+            },
+            [3] = {
+                name = 'manager',
+                label = 'Manager',
+                payment = 150,
+                isboss = true,
+                permissions = {
+                    canCook = true,
+                    canServe = true,
+                    canClean = true,
+                    canAccessStorage = true,
+                    canManageOrders = true,
+                    canHire = true,
+                    canFire = true,
+                    canSetWages = true,
+                    canAccessFinances = true,
+                    canEditMenu = true,
+                    canOrderStock = true,
+                },
+            },
+            [4] = {
+                name = 'owner',
+                label = 'Owner',
+                payment = 200,
+                isboss = true,
+                permissions = {
+                    all = true,
+                },
+            },
+        },
+    },
+
     --[[
         TEMPLATE: Use this as a base for adding new restaurants
         Copy and modify as needed

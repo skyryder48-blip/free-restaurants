@@ -25,6 +25,7 @@ shared_scripts {
     'shared/utils.lua',
     'config/settings.lua',
     'config/jobs.lua',
+    'config/station_types.lua',
     'config/recipes.lua',
     'config/locations.lua',
 }
