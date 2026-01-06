@@ -1372,23 +1372,45 @@ end)
 
 -- Initialize stations when entering a restaurant
 RegisterNetEvent('free-restaurants:client:enteredRestaurant', function(locationKey, locationData)
+    print(('[free-restaurants] Station setup triggered for: %s'):format(locationKey))
     FreeRestaurants.Utils.Debug(('Setting up stations for: %s'):format(locationKey))
-    
-    if not locationData.stations then return end
-    
+
+    if not locationData then
+        print('[free-restaurants] ERROR: locationData is nil')
+        return
+    end
+
+    if not locationData.stations then
+        print(('[free-restaurants] No stations defined for location: %s'):format(locationKey))
+        return
+    end
+
+    print(('[free-restaurants] Found stations table, checking Config.Stations.Types...'):format(locationKey))
+
+    if not Config.Stations or not Config.Stations.Types then
+        print('[free-restaurants] ERROR: Config.Stations.Types is not defined!')
+        return
+    end
+
+    local stationCount = 0
     -- Create targets for each station
     for stationKey, stationData in pairs(locationData.stations) do
         local stationTypeConfig = Config.Stations.Types[stationData.type]
-        
+
         if stationTypeConfig then
             -- Add job reference if not present
             stationData.job = stationData.job or locationData.job
-            
+
+            print(('[free-restaurants] Creating station target: %s (type: %s)'):format(stationKey, stationData.type))
             createStationTargets(locationKey, stationKey, stationData, stationTypeConfig)
+            stationCount = stationCount + 1
         else
+            print(('[free-restaurants] WARNING: Unknown station type: %s'):format(stationData.type))
             FreeRestaurants.Utils.Debug(('Unknown station type: %s'):format(stationData.type))
         end
     end
+
+    print(('[free-restaurants] Created %d station targets for %s'):format(stationCount, locationKey))
 end)
 
 -- Clean up stations when leaving a restaurant
