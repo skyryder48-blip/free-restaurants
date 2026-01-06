@@ -298,6 +298,25 @@ Config.Stations.Types = {
         },
         slotSpacing = 0.4,
     },
+
+    -- Microwave (for heating items)
+    ['microwave'] = {
+        label = 'Microwave',
+        icon = 'fa-solid fa-radiation',
+        capacity = {
+            slots = 1,
+            simultaneousWork = false,
+        },
+        requirements = {
+            minGrade = 0,
+            permission = 'canCook',
+        },
+        particles = {},
+        slotSpacing = 0.3,
+    },
 }
 
-return Config.Stations
+-- Debug: Print to verify file loaded
+local stationCount = 0
+for _ in pairs(Config.Stations.Types) do stationCount = stationCount + 1 end
+print(('[free-restaurants] config/station_types.lua loaded - %d station types defined'):format(stationCount))
