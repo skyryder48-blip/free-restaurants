@@ -1445,6 +1445,225 @@ Config.Locations['tequilala'] = {
 }
 
 -- ============================================================================
+-- TACO FARMER LOCATIONS
+-- ============================================================================
+
+Config.Locations['tacofarmer'] = {
+    --[[
+        MAIN LOCATION: Pilsen
+        Authentic Mexican taco restaurant
+    ]]
+    ['pilsen'] = {
+        label = 'Taco Farmer - Pilsen',
+        shortName = 'TF Pilsen',
+        description = 'Authentic taco restaurant in Pilsen',
+
+        job = 'tacofarmer',
+        restaurantType = 'mexican',
+        enabled = true,
+
+        mlo = {
+            required = true,
+            resource = 'tacofarmer_mlo',
+            interiorId = nil,
+        },
+
+        -- These coordinates are placeholders - adjust to match your MLO
+        entrance = {
+            coords = vec3(10.0, -1605.0, 29.4),
+            heading = 140.0,
+            teleport = nil,
+        },
+
+        blip = {
+            enabled = true,
+            coords = vec3(10.0, -1605.0, 29.4),
+            sprite = 106,
+            color = 46,
+            scale = 0.8,
+            label = 'Taco Farmer',
+        },
+
+        zone = {
+            type = 'circle',
+            center = vec3(10.0, -1605.0, 29.4),
+            radius = 25.0,
+            minZ = 27.0,
+            maxZ = 35.0,
+        },
+
+        duty = {
+            clockIn = {
+                coords = vec3(12.0, -1602.0, 29.4),
+                heading = 140.0,
+                label = 'Clock In/Out',
+                targetSize = vec3(1.0, 1.0, 2.0),
+            },
+            locker = {
+                coords = vec3(14.0, -1600.0, 29.4),
+                heading = 50.0,
+                label = 'Employee Locker',
+                targetSize = vec3(1.5, 0.5, 2.0),
+            },
+        },
+
+        -- Cooking Stations
+        stations = {
+            -- Flat Top Grill for meats
+            ['grill_1'] = {
+                type = 'grill',
+                label = 'Flat Top Grill',
+                coords = vec3(5.0, -1608.0, 29.4),
+                heading = 320.0,
+                targetSize = vec3(1.5, 1.0, 1.0),
+            },
+
+            -- Taco Assembly Station
+            ['taco_1'] = {
+                type = 'taco_station',
+                label = 'Taco Assembly',
+                coords = vec3(7.0, -1606.0, 29.4),
+                heading = 140.0,
+                targetSize = vec3(2.0, 1.0, 1.0),
+            },
+
+            -- Prep Counter for ingredients
+            ['prep_1'] = {
+                type = 'prep_counter',
+                label = 'Prep Counter',
+                coords = vec3(9.0, -1604.0, 29.4),
+                heading = 230.0,
+                targetSize = vec3(2.0, 1.0, 1.0),
+            },
+
+            -- Fryer for chips, churros
+            ['fryer_1'] = {
+                type = 'fryer',
+                label = 'Deep Fryer',
+                coords = vec3(3.0, -1610.0, 29.4),
+                heading = 320.0,
+                targetSize = vec3(0.8, 0.6, 1.0),
+            },
+
+            -- Soda Fountain / Drinks
+            ['soda_1'] = {
+                type = 'soda_fountain',
+                label = 'Drinks Station',
+                coords = vec3(15.0, -1601.0, 29.4),
+                heading = 50.0,
+                targetSize = vec3(1.0, 0.5, 1.5),
+            },
+
+            -- Blender for frozen drinks
+            ['blender_1'] = {
+                type = 'blender',
+                label = 'Blender',
+                coords = vec3(16.0, -1602.0, 29.4),
+                heading = 140.0,
+                targetSize = vec3(0.6, 0.6, 1.0),
+            },
+
+            -- Packaging/Pickup
+            ['packaging_1'] = {
+                type = 'packaging_station',
+                label = 'Order Pickup',
+                coords = vec3(13.0, -1599.0, 29.4),
+                heading = 50.0,
+                targetSize = vec3(1.5, 0.8, 1.0),
+            },
+        },
+
+        -- Storage Areas
+        storage = {
+            ['main_storage'] = {
+                label = 'Ingredient Storage',
+                coords = vec3(0.0, -1612.0, 29.4),
+                heading = 320.0,
+                targetSize = vec3(1.5, 1.5, 2.0),
+                inventoryType = 'storage',
+                slots = 50,
+                weight = 100000,
+                groups = { tacofarmer = 1 },
+            },
+            ['freezer'] = {
+                label = 'Walk-in Freezer',
+                coords = vec3(-2.0, -1614.0, 29.4),
+                heading = 320.0,
+                targetSize = vec3(2.0, 2.0, 2.5),
+                inventoryType = 'storage',
+                slots = 60,
+                weight = 120000,
+                groups = { tacofarmer = 1 },
+                decayMultiplier = 0.15,
+            },
+        },
+
+        -- Customer Interaction
+        customer = {
+            counter = {
+                coords = vec3(11.0, -1600.0, 29.4),
+                heading = 140.0,
+                targetSize = vec3(2.5, 1.0, 1.5),
+                label = 'Order Here',
+            },
+            seating = {
+                { coords = vec3(18.0, -1598.0, 29.4), heading = 230.0 },
+                { coords = vec3(20.0, -1600.0, 29.4), heading = 140.0 },
+                { coords = vec3(22.0, -1602.0, 29.4), heading = 50.0 },
+            },
+        },
+
+        driveThru = {
+            enabled = false,
+        },
+
+        office = {
+            coords = vec3(-3.0, -1616.0, 29.4),
+            heading = 320.0,
+            safe = {
+                coords = vec3(-4.0, -1617.0, 29.4),
+                heading = 230.0,
+                targetSize = vec3(0.6, 0.6, 1.0),
+            },
+            computer = {
+                coords = vec3(-2.0, -1615.0, 29.4),
+                heading = 50.0,
+                targetSize = vec3(0.8, 0.6, 0.8),
+            },
+        },
+
+        cleaning = {
+            { type = 'counter', coords = vec3(8.0, -1605.0, 29.4) },
+            { type = 'floor', coords = vec3(17.0, -1599.0, 29.4) },
+            { type = 'grill', coords = vec3(5.0, -1608.0, 29.4) },
+        },
+
+        delivery = {
+            vehicleSpawn = {
+                coords = vec3(25.0, -1595.0, 29.4),
+                heading = 140.0,
+            },
+            returnPoint = {
+                coords = vec3(10.0, -1605.0, 29.4),
+            },
+        },
+
+        breakRoom = {
+            enabled = true,
+            coords = vec3(-5.0, -1618.0, 29.4),
+            zone = {
+                type = 'circle',
+                radius = 2.5,
+            },
+        },
+
+        restrooms = {
+            { label = 'Restroom', coords = vec3(24.0, -1604.0, 29.4), heading = 140.0 },
+        },
+    },
+}
+
+-- ============================================================================
 -- CATERING DELIVERY LOCATIONS
 -- Random NPC catering order destinations
 -- ============================================================================
