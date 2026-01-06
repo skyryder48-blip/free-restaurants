@@ -22,6 +22,13 @@ local storedClothing = nil          -- Stored civilian clothing when on duty
 local dutyTargets = {}              -- Track created target zones for cleanup
 local isChangingClothes = false     -- Prevent spam clicking
 
+-- Helper function to count table entries
+local function tableSize(tbl)
+    local count = 0
+    for _ in pairs(tbl) do count = count + 1 end
+    return count
+end
+
 -- ============================================================================
 -- UNIFORM MANAGEMENT
 -- ============================================================================
@@ -507,7 +514,7 @@ local function initializeDutyTargets()
         end
     end
     
-    FreeRestaurants.Utils.Debug(('Initialized %d duty targets'):format(lib.table.size(dutyTargets)))
+    FreeRestaurants.Utils.Debug(('Initialized %d duty targets'):format(tableSize(dutyTargets)))
 end
 
 -- ============================================================================
