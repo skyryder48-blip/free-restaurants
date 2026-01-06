@@ -243,6 +243,14 @@ local function calculateLevel(xp)
     return math.max(1, level - 1)
 end
 
+-- Helper function to check if table contains value
+local function tableContains(tbl, value)
+    for _, v in pairs(tbl) do
+        if v == value then return true end
+    end
+    return false
+end
+
 --- Check if player can craft recipe (level requirement)
 ---@param source number
 ---@param recipe table
@@ -263,20 +271,12 @@ local function canCraftRecipe(source, recipe)
     -- Check if recipe is unlocked
     if recipe.requiresUnlock then
         local restaurantData = exports['free-restaurants']:GetPlayerRestaurantData(player.PlayerData.citizenid)
-        if not restaurantData.unlockedRecipes or not table.contains(restaurantData.unlockedRecipes, recipe.id) then
+        if not restaurantData.unlockedRecipes or not tableContains(restaurantData.unlockedRecipes, recipe.id) then
             return false, 'Recipe not unlocked'
         end
     end
     
     return true, nil
-end
-
--- Helper function
-local function table.contains(tbl, value)
-    for _, v in pairs(tbl) do
-        if v == value then return true end
-    end
-    return false
 end
 
 -- ============================================================================
@@ -384,8 +384,8 @@ lib.callback.register('free-restaurants:server:getAvailableRecipes', function(so
             local levelOk = not recipe.levelRequired or restaurantData.cookingLevel >= recipe.levelRequired
             
             -- Check if unlocked
-            local unlocked = not recipe.requiresUnlock or 
-                (restaurantData.unlockedRecipes and table.contains(restaurantData.unlockedRecipes, recipeId))
+            local unlocked = not recipe.requiresUnlock or
+                (restaurantData.unlockedRecipes and tableContains(restaurantData.unlockedRecipes, recipeId))
             
             if levelOk and unlocked then
                 table.insert(availableRecipes, {
