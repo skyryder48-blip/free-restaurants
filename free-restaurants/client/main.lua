@@ -365,12 +365,17 @@ end
 local function hasPermission(permission)
     local job = getPlayerState('job')
     local grade = getPlayerState('grade') or 0
-    
+
     if not job or not Config.Jobs[job] then return false end
-    
+
     local gradeData = Config.Jobs[job].grades[grade]
     if not gradeData or not gradeData.permissions then return false end
-    
+
+    -- Check for "all" permission (owner/admin access)
+    if gradeData.permissions.all == true then
+        return true
+    end
+
     return gradeData.permissions[permission] == true
 end
 
