@@ -324,12 +324,12 @@ end
 
 --- Update player job state
 local function updateJobState()
-    local playerData = QBX.PlayerData
+    local playerData = exports.qbx_core:GetPlayerData()
     if not playerData or not playerData.job then return end
-    
+
     updatePlayerState('job', playerData.job.name)
     updatePlayerState('grade', playerData.job.grade.level)
-    
+
     FreeRestaurants.Utils.Debug(('Job state updated: %s (grade %d)'):format(
         playerData.job.name,
         playerData.job.grade.level

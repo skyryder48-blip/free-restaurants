@@ -1,16 +1,19 @@
 --[[
     free-restaurants Server Station Management
-    
+
     Handles:
     - Server-authoritative slot claiming/releasing
     - State bag synchronization for all clients
     - Slot timeout and cleanup
     - Fire state synchronization
-    
+
     DEPENDENCIES:
     - oxmysql (optional, for persistence)
     - ox_lib (callbacks)
 ]]
+
+-- This file is server-side only, exit early on client
+if not IsDuplicityVersion() then return end
 
 -- ============================================================================
 -- LOCAL STATE
