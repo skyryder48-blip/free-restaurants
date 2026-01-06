@@ -40,6 +40,13 @@ local DecayConfig = {
 -- Track which items should decay
 local decayableItems = {}
 
+-- Helper function (must be defined before use)
+local function tableCount(tbl)
+    local count = 0
+    for _ in pairs(tbl) do count = count + 1 end
+    return count
+end
+
 -- ============================================================================
 -- INITIALIZATION
 -- ============================================================================
@@ -74,13 +81,6 @@ local function initializeDecayableItems()
     end
     
     print(('[free-restaurants] Initialized decay for %d items'):format(tableCount(decayableItems)))
-end
-
--- Helper
-local function tableCount(tbl)
-    local count = 0
-    for _ in pairs(tbl) do count = count + 1 end
-    return count
 end
 
 -- ============================================================================

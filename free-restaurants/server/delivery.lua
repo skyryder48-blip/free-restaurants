@@ -28,6 +28,13 @@ local deliveryDestinations = {}
 -- Available catering destinations
 local cateringDestinations = {}
 
+-- Helper function (must be defined before use)
+local function tableCount(tbl)
+    local count = 0
+    for _ in pairs(tbl) do count = count + 1 end
+    return count
+end
+
 -- ============================================================================
 -- INITIALIZATION
 -- ============================================================================
@@ -52,12 +59,6 @@ local function loadDestinations()
         tableCount(deliveryDestinations),
         tableCount(cateringDestinations)
     ))
-end
-
-local function tableCount(tbl)
-    local count = 0
-    for _ in pairs(tbl) do count = count + 1 end
-    return count
 end
 
 -- ============================================================================
