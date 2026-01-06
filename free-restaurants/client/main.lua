@@ -322,7 +322,7 @@ local function initializeBlips()
         end
     end
     
-    FreeRestaurants.Utils.Debug(('Created %d restaurant blips'):format(lib.table.size(blips)))
+    FreeRestaurants.Utils.Debug(('Created %d restaurant blips'):format(tableSize(blips)))
 end
 
 -- ============================================================================
