@@ -1385,12 +1385,31 @@ RegisterNetEvent('free-restaurants:client:enteredRestaurant', function(locationK
         return
     end
 
-    print(('[free-restaurants] Found stations table, checking Config.Stations.Types...'):format(locationKey))
+    print(('[free-restaurants] Found stations table for %s, checking Config.Stations.Types...'):format(locationKey))
 
-    if not Config.Stations or not Config.Stations.Types then
-        print('[free-restaurants] ERROR: Config.Stations.Types is not defined!')
+    -- Detailed diagnostic for Config.Stations
+    if not Config then
+        print('[free-restaurants] ERROR: Config is nil!')
         return
     end
+    if not Config.Stations then
+        print('[free-restaurants] ERROR: Config.Stations is nil!')
+        print('[free-restaurants] Available Config keys:')
+        for k, _ in pairs(Config) do
+            print(('  - %s'):format(tostring(k)))
+        end
+        return
+    end
+    if not Config.Stations.Types then
+        print('[free-restaurants] ERROR: Config.Stations.Types is nil!')
+        print('[free-restaurants] Available Config.Stations keys:')
+        for k, _ in pairs(Config.Stations) do
+            print(('  - %s'):format(tostring(k)))
+        end
+        return
+    end
+
+    print(('[free-restaurants] Config.Stations.Types found with station definitions'):format())
 
     local stationCount = 0
     -- Create targets for each station
