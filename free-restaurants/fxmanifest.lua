@@ -25,7 +25,6 @@ shared_scripts {
     'shared/utils.lua',
     'config/settings.lua',
     'config/jobs.lua',
-    'config/stations.lua',
     'config/recipes.lua',
     'config/locations.lua',
 }
@@ -49,6 +48,7 @@ client_scripts {
 -- Server scripts
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
+    'config/stations.lua',
     'server/main.lua',
     'server/banking.lua',
     'server/duty.lua',

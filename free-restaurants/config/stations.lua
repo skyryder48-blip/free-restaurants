@@ -10,10 +10,9 @@
     DEPENDENCIES:
     - oxmysql (optional, for persistence)
     - ox_lib (callbacks)
-]]
 
--- This file is server-side only, exit early on client
-if not IsDuplicityVersion() then return end
+    NOTE: This file is loaded as a server script only (see fxmanifest.lua)
+]]
 
 -- ============================================================================
 -- LOCAL STATE
