@@ -19,6 +19,82 @@
 -- ============================================================================
 
 local managementTargets = {}
+local storageTargets = {}
+
+-- ============================================================================
+-- STORAGE SYSTEM
+-- ============================================================================
+
+--- Open a storage inventory
+---@param storageKey string Storage identifier
+---@param storageData table Storage configuration
+---@param locationKey string Location identifier
+local function openStorage(storageKey, storageData, locationKey)
+    local stashId = ('restaurant_%s_%s'):format(locationKey, storageKey)
+
+    -- Register the stash if it doesn't exist
+    exports.ox_inventory:openInventory('stash', {
+        id = stashId,
+        label = storageData.label or 'Storage',
+        slots = storageData.slots or 50,
+        weight = storageData.weight or 100000,
+        groups = storageData.groups,
+    })
+end
+
+--- Setup storage targets for all locations
+local function setupStorageTargets()
+    -- Remove existing targets
+    for targetId in pairs(storageTargets) do
+        exports.ox_target:removeZone(targetId)
+    end
+    storageTargets = {}
+
+    for restaurantType, locations in pairs(Config.Locations) do
+        if type(locations) == 'table' and restaurantType ~= 'Settings'
+           and restaurantType ~= 'CateringDestinations'
+           and restaurantType ~= 'DeliveryDestinations' then
+            for locationId, locationData in pairs(locations) do
+                if type(locationData) == 'table' and locationData.enabled and locationData.storage then
+                    local locationKey = ('%s_%s'):format(restaurantType, locationId)
+
+                    for storageKey, storageData in pairs(locationData.storage) do
+                        local targetId = ('%s_storage_%s'):format(locationKey, storageKey)
+
+                        exports.ox_target:addBoxZone({
+                            name = targetId,
+                            coords = storageData.coords,
+                            size = storageData.targetSize or vec3(1.5, 1.5, 2.0),
+                            rotation = storageData.heading or 0,
+                            debug = Config.Debug,
+                            options = {
+                                {
+                                    name = 'open_storage_' .. storageKey,
+                                    label = storageData.label or 'Storage',
+                                    icon = 'fa-solid fa-box',
+                                    groups = storageData.groups or { [locationData.job] = 0 },
+                                    canInteract = function()
+                                        return FreeRestaurants.Client.IsOnDuty()
+                                    end,
+                                    onSelect = function()
+                                        openStorage(storageKey, storageData, locationKey)
+                                    end,
+                                },
+                            },
+                        })
+
+                        storageTargets[targetId] = true
+                        FreeRestaurants.Utils.Debug(('Created storage target: %s'):format(targetId))
+                    end
+                end
+            end
+        end
+    end
+
+    local count = 0
+    for _ in pairs(storageTargets) do count = count + 1 end
+    FreeRestaurants.Utils.Debug(('Initialized %d storage targets'):format(count))
+end
 
 -- ============================================================================
 -- PERMISSION CHECKS
@@ -1022,6 +1098,7 @@ end
 -- Initialize on ready
 RegisterNetEvent('free-restaurants:client:ready', function()
     setupManagementTargets()
+    setupStorageTargets()
 end)
 
 -- Command fallback
@@ -1038,11 +1115,29 @@ RegisterCommand('management', function()
     end
 end, false)
 
+-- Clean up on resource stop
+AddEventHandler('onResourceStop', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then return end
+
+    -- Remove management targets
+    for targetId in pairs(managementTargets) do
+        exports.ox_target:removeZone(targetId)
+    end
+    managementTargets = {}
+
+    -- Remove storage targets
+    for targetId in pairs(storageTargets) do
+        exports.ox_target:removeZone(targetId)
+    end
+    storageTargets = {}
+end)
+
 -- ============================================================================
 -- EXPORTS
 -- ============================================================================
 
 exports('OpenManagementMenu', openManagementMenu)
 exports('CanAccessManagement', canAccessManagement)
+exports('OpenStorage', openStorage)
 
 FreeRestaurants.Utils.Debug('client/management.lua loaded')
