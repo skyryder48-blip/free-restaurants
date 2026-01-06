@@ -1,0 +1,1048 @@
+--[[
+    free-restaurants Client Management System
+    
+    Handles:
+    - Boss menu interface
+    - Employee management (hire, fire, promote)
+    - Payroll and wages
+    - Business finances
+    - Stock/inventory ordering
+    - Menu pricing
+    
+    DEPENDENCIES:
+    - client/main.lua (state management)
+    - ox_lib (UI components)
+]]
+
+-- ============================================================================
+-- LOCAL STATE
+-- ============================================================================
+
+local managementTargets = {}
+
+-- ============================================================================
+-- PERMISSION CHECKS
+-- ============================================================================
+
+--- Check if player can access management menu
+---@return boolean
+local function canAccessManagement()
+    if not FreeRestaurants.Client.IsOnDuty() then
+        return false
+    end
+    
+    -- Check for boss permission
+    return FreeRestaurants.Client.HasPermission('canAccessFinances') or
+           FreeRestaurants.Client.HasPermission('canHire') or
+           FreeRestaurants.Client.HasPermission('canFire')
+end
+
+-- ============================================================================
+-- MANAGEMENT MENU
+-- ============================================================================
+
+--- Open main management menu
+---@param locationKey string
+---@param locationData table
+local function openManagementMenu(locationKey, locationData)
+    if not canAccessManagement() then
+        lib.notify({
+            title = 'Access Denied',
+            description = 'You don\'t have permission to access management.',
+            type = 'error',
+        })
+        return
+    end
+    
+    local options = {}
+    
+    -- Header
+    table.insert(options, {
+        title = locationData.label .. ' Management',
+        description = 'Business administration panel',
+        icon = 'building',
+        disabled = true,
+    })
+    
+    -- Employee Management
+    if FreeRestaurants.Client.HasPermission('canHire') or 
+       FreeRestaurants.Client.HasPermission('canFire') then
+        table.insert(options, {
+            title = 'Employee Management',
+            description = 'Hire, fire, and manage staff',
+            icon = 'users',
+            onSelect = function()
+                openEmployeeMenu(locationKey, locationData)
+            end,
+        })
+    end
+    
+    -- Finances
+    if FreeRestaurants.Client.HasPermission('canAccessFinances') then
+        table.insert(options, {
+            title = 'Finances',
+            description = 'View and manage business funds',
+            icon = 'chart-line',
+            onSelect = function()
+                openFinancesMenu(locationKey, locationData)
+            end,
+        })
+    end
+    
+    -- Stock Management
+    if FreeRestaurants.Client.HasPermission('canOrderStock') then
+        table.insert(options, {
+            title = 'Stock Orders',
+            description = 'Order supplies and ingredients',
+            icon = 'boxes-stacked',
+            onSelect = function()
+                openStockMenu(locationKey, locationData)
+            end,
+        })
+    end
+    
+    -- Menu Pricing
+    if FreeRestaurants.Client.HasPermission('canEditMenu') then
+        table.insert(options, {
+            title = 'Menu Pricing',
+            description = 'Adjust menu prices',
+            icon = 'tags',
+            onSelect = function()
+                openPricingMenu(locationKey, locationData)
+            end,
+        })
+    end
+    
+    -- Payroll
+    if FreeRestaurants.Client.HasPermission('canSetWages') then
+        table.insert(options, {
+            title = 'Payroll Settings',
+            description = 'Configure employee wages',
+            icon = 'money-check-dollar',
+            onSelect = function()
+                openPayrollMenu(locationKey, locationData)
+            end,
+        })
+    end
+    
+    -- Business Storage
+    table.insert(options, {
+        title = 'Business Storage',
+        description = 'Access shared storage',
+        icon = 'warehouse',
+        onSelect = function()
+            openBusinessStorage(locationKey, locationData)
+        end,
+    })
+    
+    lib.registerContext({
+        id = 'management_menu',
+        title = 'Management',
+        options = options,
+    })
+    
+    lib.showContext('management_menu')
+end
+
+-- ============================================================================
+-- EMPLOYEE MANAGEMENT
+-- ============================================================================
+
+--- Open employee management menu
+---@param locationKey string
+---@param locationData table
+local function openEmployeeMenu(locationKey, locationData)
+    local options = {}
+    
+    -- Get employee list from server
+    local employees = lib.callback.await('free-restaurants:server:getEmployees', false, locationData.job)
+    
+    if not employees or #employees == 0 then
+        table.insert(options, {
+            title = 'No Employees',
+            description = 'Hire staff to get started',
+            icon = 'user-slash',
+            disabled = true,
+        })
+    else
+        -- Group by grade
+        local byGrade = {}
+        for _, emp in ipairs(employees) do
+            local grade = emp.grade or 0
+            if not byGrade[grade] then
+                byGrade[grade] = {}
+            end
+            table.insert(byGrade[grade], emp)
+        end
+        
+        -- Display by grade (highest first)
+        local grades = {}
+        for grade in pairs(byGrade) do
+            table.insert(grades, grade)
+        end
+        table.sort(grades, function(a, b) return a > b end)
+        
+        for _, grade in ipairs(grades) do
+            local gradeData = Config.Jobs[locationData.job].grades[grade]
+            local gradeName = gradeData and gradeData.label or ('Grade %d'):format(grade)
+            
+            table.insert(options, {
+                title = ('--- %s ---'):format(gradeName),
+                disabled = true,
+            })
+            
+            for _, emp in ipairs(byGrade[grade]) do
+                local isOnDuty = emp.onDuty and 'ðŸŸ¢' or 'ðŸ”´'
+                
+                table.insert(options, {
+                    title = ('%s %s %s'):format(isOnDuty, emp.firstname, emp.lastname),
+                    description = gradeName,
+                    icon = 'user',
+                    onSelect = function()
+                        openEmployeeActions(emp, locationKey, locationData)
+                    end,
+                })
+            end
+        end
+    end
+    
+    -- Hire option
+    if FreeRestaurants.Client.HasPermission('canHire') then
+        table.insert(options, {
+            title = 'Hire New Employee',
+            description = 'Hire a nearby player',
+            icon = 'user-plus',
+            onSelect = function()
+                hireEmployee(locationKey, locationData)
+            end,
+        })
+    end
+    
+    lib.registerContext({
+        id = 'employee_menu',
+        title = 'Employees',
+        menu = 'management_menu',
+        options = options,
+    })
+    
+    lib.showContext('employee_menu')
+end
+
+--- Open actions for specific employee
+---@param employee table
+---@param locationKey string
+---@param locationData table
+local function openEmployeeActions(employee, locationKey, locationData)
+    local options = {}
+    local jobConfig = Config.Jobs[locationData.job]
+    local maxGrade = 0
+    for grade in pairs(jobConfig.grades) do
+        if grade > maxGrade then maxGrade = grade end
+    end
+    
+    -- Employee info
+    table.insert(options, {
+        title = ('%s %s'):format(employee.firstname, employee.lastname),
+        description = ('CID: %s'):format(employee.citizenid),
+        icon = 'id-card',
+        disabled = true,
+    })
+    
+    -- Promote
+    if FreeRestaurants.Client.HasPermission('canHire') and employee.grade < maxGrade then
+        table.insert(options, {
+            title = 'Promote',
+            description = 'Increase employee grade',
+            icon = 'arrow-up',
+            onSelect = function()
+                promoteEmployee(employee, locationKey, locationData)
+            end,
+        })
+    end
+    
+    -- Demote
+    if FreeRestaurants.Client.HasPermission('canFire') and employee.grade > 0 then
+        table.insert(options, {
+            title = 'Demote',
+            description = 'Decrease employee grade',
+            icon = 'arrow-down',
+            onSelect = function()
+                demoteEmployee(employee, locationKey, locationData)
+            end,
+        })
+    end
+    
+    -- Set specific grade
+    if FreeRestaurants.Client.HasPermission('canHire') then
+        table.insert(options, {
+            title = 'Set Grade',
+            description = 'Set specific grade level',
+            icon = 'sliders',
+            onSelect = function()
+                setEmployeeGrade(employee, locationKey, locationData)
+            end,
+        })
+    end
+    
+    -- Fire
+    if FreeRestaurants.Client.HasPermission('canFire') then
+        table.insert(options, {
+            title = 'Fire Employee',
+            description = 'Terminate employment',
+            icon = 'user-minus',
+            onSelect = function()
+                fireEmployee(employee, locationKey, locationData)
+            end,
+        })
+    end
+    
+    lib.registerContext({
+        id = 'employee_actions',
+        title = 'Employee Actions',
+        menu = 'employee_menu',
+        options = options,
+    })
+    
+    lib.showContext('employee_actions')
+end
+
+--- Hire a new employee
+---@param locationKey string
+---@param locationData table
+local function hireEmployee(locationKey, locationData)
+    -- Get nearby players
+    local nearbyPlayers = lib.callback.await('free-restaurants:server:getNearbyPlayers', false, 10.0)
+    
+    if not nearbyPlayers or #nearbyPlayers == 0 then
+        lib.notify({
+            title = 'No Players Nearby',
+            description = 'There are no players nearby to hire.',
+            type = 'error',
+        })
+        return
+    end
+    
+    local options = {}
+    
+    for _, player in ipairs(nearbyPlayers) do
+        table.insert(options, {
+            title = player.name,
+            description = ('Server ID: %d'):format(player.id),
+            icon = 'user',
+            onSelect = function()
+                -- Select starting grade
+                local jobConfig = Config.Jobs[locationData.job]
+                local gradeOptions = {}
+                
+                for grade, gradeData in pairs(jobConfig.grades) do
+                    table.insert(gradeOptions, {
+                        value = grade,
+                        label = gradeData.label,
+                    })
+                end
+                
+                table.sort(gradeOptions, function(a, b) return a.value < b.value end)
+                
+                local input = lib.inputDialog('Hire ' .. player.name, {
+                    {
+                        type = 'select',
+                        label = 'Starting Position',
+                        options = gradeOptions,
+                        default = 0,
+                    },
+                })
+                
+                if input then
+                    local success = lib.callback.await(
+                        'free-restaurants:server:hireEmployee',
+                        false,
+                        player.id,
+                        locationData.job,
+                        input[1]
+                    )
+                    
+                    if success then
+                        lib.notify({
+                            title = 'Employee Hired',
+                            description = ('%s has been hired!'):format(player.name),
+                            type = 'success',
+                        })
+                    else
+                        lib.notify({
+                            title = 'Hire Failed',
+                            description = 'Could not hire this player.',
+                            type = 'error',
+                        })
+                    end
+                end
+                
+                openEmployeeMenu(locationKey, locationData)
+            end,
+        })
+    end
+    
+    lib.registerContext({
+        id = 'hire_menu',
+        title = 'Hire Employee',
+        menu = 'employee_menu',
+        options = options,
+    })
+    
+    lib.showContext('hire_menu')
+end
+
+--- Promote employee
+local function promoteEmployee(employee, locationKey, locationData)
+    local newGrade = employee.grade + 1
+    local success = lib.callback.await(
+        'free-restaurants:server:setEmployeeGrade',
+        false,
+        employee.citizenid,
+        locationData.job,
+        newGrade
+    )
+    
+    if success then
+        lib.notify({
+            title = 'Employee Promoted',
+            description = ('%s has been promoted!'):format(employee.firstname),
+            type = 'success',
+        })
+    else
+        lib.notify({
+            title = 'Promotion Failed',
+            type = 'error',
+        })
+    end
+    
+    openEmployeeMenu(locationKey, locationData)
+end
+
+--- Demote employee
+local function demoteEmployee(employee, locationKey, locationData)
+    local newGrade = math.max(0, employee.grade - 1)
+    local success = lib.callback.await(
+        'free-restaurants:server:setEmployeeGrade',
+        false,
+        employee.citizenid,
+        locationData.job,
+        newGrade
+    )
+    
+    if success then
+        lib.notify({
+            title = 'Employee Demoted',
+            description = ('%s has been demoted.'):format(employee.firstname),
+            type = 'inform',
+        })
+    else
+        lib.notify({
+            title = 'Demotion Failed',
+            type = 'error',
+        })
+    end
+    
+    openEmployeeMenu(locationKey, locationData)
+end
+
+--- Set specific grade
+local function setEmployeeGrade(employee, locationKey, locationData)
+    local jobConfig = Config.Jobs[locationData.job]
+    local gradeOptions = {}
+    
+    for grade, gradeData in pairs(jobConfig.grades) do
+        table.insert(gradeOptions, {
+            value = grade,
+            label = gradeData.label,
+        })
+    end
+    
+    table.sort(gradeOptions, function(a, b) return a.value < b.value end)
+    
+    local input = lib.inputDialog('Set Grade', {
+        {
+            type = 'select',
+            label = 'Position',
+            options = gradeOptions,
+            default = employee.grade,
+        },
+    })
+    
+    if input then
+        local success = lib.callback.await(
+            'free-restaurants:server:setEmployeeGrade',
+            false,
+            employee.citizenid,
+            locationData.job,
+            input[1]
+        )
+        
+        if success then
+            lib.notify({
+                title = 'Grade Updated',
+                type = 'success',
+            })
+        else
+            lib.notify({
+                title = 'Update Failed',
+                type = 'error',
+            })
+        end
+    end
+    
+    openEmployeeMenu(locationKey, locationData)
+end
+
+--- Fire employee
+local function fireEmployee(employee, locationKey, locationData)
+    local confirm = lib.alertDialog({
+        header = 'Fire Employee',
+        content = ('Are you sure you want to fire %s %s?'):format(employee.firstname, employee.lastname),
+        centered = true,
+        cancel = true,
+    })
+    
+    if confirm ~= 'confirm' then return end
+    
+    local success = lib.callback.await(
+        'free-restaurants:server:fireEmployee',
+        false,
+        employee.citizenid,
+        locationData.job
+    )
+    
+    if success then
+        lib.notify({
+            title = 'Employee Fired',
+            description = ('%s has been terminated.'):format(employee.firstname),
+            type = 'success',
+        })
+    else
+        lib.notify({
+            title = 'Fire Failed',
+            type = 'error',
+        })
+    end
+    
+    openEmployeeMenu(locationKey, locationData)
+end
+
+-- ============================================================================
+-- FINANCES
+-- ============================================================================
+
+--- Open finances menu
+---@param locationKey string
+---@param locationData table
+local function openFinancesMenu(locationKey, locationData)
+    -- Get financial data from server
+    local finances = lib.callback.await('free-restaurants:server:getFinances', false, locationData.job)
+    
+    local options = {}
+    
+    if finances then
+        table.insert(options, {
+            title = ('Balance: %s'):format(FreeRestaurants.Utils.FormatMoney(finances.balance)),
+            icon = 'wallet',
+            disabled = true,
+        })
+        
+        table.insert(options, {
+            title = ('Today\'s Sales: %s'):format(FreeRestaurants.Utils.FormatMoney(finances.todaySales)),
+            icon = 'cash-register',
+            disabled = true,
+        })
+        
+        table.insert(options, {
+            title = ('This Week: %s'):format(FreeRestaurants.Utils.FormatMoney(finances.weekSales)),
+            icon = 'chart-simple',
+            disabled = true,
+        })
+    end
+    
+    table.insert(options, {
+        title = 'Withdraw Funds',
+        description = 'Transfer to personal account',
+        icon = 'money-bill-transfer',
+        onSelect = function()
+            withdrawFunds(locationKey, locationData, finances)
+        end,
+    })
+    
+    table.insert(options, {
+        title = 'Deposit Funds',
+        description = 'Add money to business',
+        icon = 'money-bill-trend-up',
+        onSelect = function()
+            depositFunds(locationKey, locationData)
+        end,
+    })
+    
+    table.insert(options, {
+        title = 'Transaction History',
+        description = 'View recent transactions',
+        icon = 'receipt',
+        onSelect = function()
+            viewTransactions(locationKey, locationData)
+        end,
+    })
+    
+    lib.registerContext({
+        id = 'finances_menu',
+        title = 'Finances',
+        menu = 'management_menu',
+        options = options,
+    })
+    
+    lib.showContext('finances_menu')
+end
+
+--- Withdraw funds
+local function withdrawFunds(locationKey, locationData, finances)
+    local maxWithdraw = finances and finances.balance or 0
+    
+    local input = lib.inputDialog('Withdraw Funds', {
+        {
+            type = 'number',
+            label = 'Amount',
+            description = ('Max: %s'):format(FreeRestaurants.Utils.FormatMoney(maxWithdraw)),
+            min = 1,
+            max = maxWithdraw,
+        },
+    })
+    
+    if input and input[1] then
+        local success = lib.callback.await(
+            'free-restaurants:server:withdrawFunds',
+            false,
+            locationData.job,
+            input[1]
+        )
+        
+        if success then
+            lib.notify({
+                title = 'Withdrawal Complete',
+                description = FreeRestaurants.Utils.FormatMoney(input[1]),
+                type = 'success',
+            })
+        else
+            lib.notify({
+                title = 'Withdrawal Failed',
+                type = 'error',
+            })
+        end
+    end
+    
+    openFinancesMenu(locationKey, locationData)
+end
+
+--- Deposit funds
+local function depositFunds(locationKey, locationData)
+    local input = lib.inputDialog('Deposit Funds', {
+        {
+            type = 'number',
+            label = 'Amount',
+            min = 1,
+        },
+    })
+    
+    if input and input[1] then
+        local success = lib.callback.await(
+            'free-restaurants:server:depositFunds',
+            false,
+            locationData.job,
+            input[1]
+        )
+        
+        if success then
+            lib.notify({
+                title = 'Deposit Complete',
+                description = FreeRestaurants.Utils.FormatMoney(input[1]),
+                type = 'success',
+            })
+        else
+            lib.notify({
+                title = 'Deposit Failed',
+                type = 'error',
+            })
+        end
+    end
+    
+    openFinancesMenu(locationKey, locationData)
+end
+
+--- View transaction history
+local function viewTransactions(locationKey, locationData)
+    local transactions = lib.callback.await('free-restaurants:server:getTransactions', false, locationData.job)
+    
+    local options = {}
+    
+    if transactions and #transactions > 0 then
+        for _, tx in ipairs(transactions) do
+            local icon = tx.type == 'deposit' and 'arrow-up' or 'arrow-down'
+            local color = tx.type == 'deposit' and '#22c55e' or '#ef4444'
+            
+            table.insert(options, {
+                title = ('%s%s'):format(tx.type == 'deposit' and '+' or '-', 
+                    FreeRestaurants.Utils.FormatMoney(tx.amount)),
+                description = tx.description or tx.type,
+                icon = icon,
+                iconColor = color,
+                metadata = {
+                    { label = 'Date', value = tx.date },
+                    { label = 'By', value = tx.by or 'System' },
+                },
+            })
+        end
+    else
+        table.insert(options, {
+            title = 'No Transactions',
+            disabled = true,
+        })
+    end
+    
+    lib.registerContext({
+        id = 'transactions_menu',
+        title = 'Transaction History',
+        menu = 'finances_menu',
+        options = options,
+    })
+    
+    lib.showContext('transactions_menu')
+end
+
+-- ============================================================================
+-- STOCK MANAGEMENT
+-- ============================================================================
+
+--- Open stock ordering menu
+---@param locationKey string
+---@param locationData table
+local function openStockMenu(locationKey, locationData)
+    -- Get available stock items
+    local stockItems = lib.callback.await('free-restaurants:server:getStockItems', false, locationData.job)
+    
+    local options = {}
+    
+    if stockItems and #stockItems > 0 then
+        for _, item in ipairs(stockItems) do
+            table.insert(options, {
+                title = item.label,
+                description = ('%s each'):format(FreeRestaurants.Utils.FormatMoney(item.price)),
+                icon = 'box',
+                onSelect = function()
+                    orderStock(item, locationKey, locationData)
+                end,
+            })
+        end
+    else
+        table.insert(options, {
+            title = 'No Items Available',
+            disabled = true,
+        })
+    end
+    
+    lib.registerContext({
+        id = 'stock_menu',
+        title = 'Order Stock',
+        menu = 'management_menu',
+        options = options,
+    })
+    
+    lib.showContext('stock_menu')
+end
+
+--- Order specific stock item
+local function orderStock(item, locationKey, locationData)
+    local input = lib.inputDialog('Order ' .. item.label, {
+        {
+            type = 'number',
+            label = 'Quantity',
+            default = 10,
+            min = 1,
+            max = 100,
+        },
+    })
+    
+    if input and input[1] then
+        local total = item.price * input[1]
+        
+        local confirm = lib.alertDialog({
+            header = 'Confirm Order',
+            content = ('Order %dx %s for %s?'):format(input[1], item.label, 
+                FreeRestaurants.Utils.FormatMoney(total)),
+            centered = true,
+            cancel = true,
+        })
+        
+        if confirm == 'confirm' then
+            local success = lib.callback.await(
+                'free-restaurants:server:orderStock',
+                false,
+                locationData.job,
+                item.name,
+                input[1]
+            )
+            
+            if success then
+                lib.notify({
+                    title = 'Order Placed',
+                    description = ('Ordered %dx %s'):format(input[1], item.label),
+                    type = 'success',
+                })
+            else
+                lib.notify({
+                    title = 'Order Failed',
+                    type = 'error',
+                })
+            end
+        end
+    end
+    
+    openStockMenu(locationKey, locationData)
+end
+
+-- ============================================================================
+-- MENU PRICING
+-- ============================================================================
+
+--- Open pricing menu
+---@param locationKey string
+---@param locationData table
+local function openPricingMenu(locationKey, locationData)
+    -- Get current pricing
+    local pricing = lib.callback.await('free-restaurants:server:getPricing', false, locationData.job)
+    
+    local options = {}
+    
+    if pricing then
+        for itemId, data in pairs(pricing) do
+            local recipe = Config.Recipes[itemId]
+            if recipe then
+                table.insert(options, {
+                    title = recipe.label,
+                    description = ('Current: %s (Base: %s)'):format(
+                        FreeRestaurants.Utils.FormatMoney(data.price),
+                        FreeRestaurants.Utils.FormatMoney(recipe.price)
+                    ),
+                    icon = 'tag',
+                    onSelect = function()
+                        setItemPrice(itemId, recipe, data, locationKey, locationData)
+                    end,
+                })
+            end
+        end
+    end
+    
+    lib.registerContext({
+        id = 'pricing_menu',
+        title = 'Menu Pricing',
+        menu = 'management_menu',
+        options = options,
+    })
+    
+    lib.showContext('pricing_menu')
+end
+
+--- Set price for item
+local function setItemPrice(itemId, recipe, currentData, locationKey, locationData)
+    local basePrice = recipe.price
+    local minPrice = math.floor(basePrice * Config.Economy.Pricing.priceFloor)
+    local maxPrice = math.floor(basePrice * Config.Economy.Pricing.priceCeiling)
+    
+    local input = lib.inputDialog('Set Price: ' .. recipe.label, {
+        {
+            type = 'number',
+            label = 'New Price',
+            description = ('Range: %s - %s'):format(
+                FreeRestaurants.Utils.FormatMoney(minPrice),
+                FreeRestaurants.Utils.FormatMoney(maxPrice)
+            ),
+            default = currentData.price,
+            min = minPrice,
+            max = maxPrice,
+        },
+    })
+    
+    if input and input[1] then
+        local success = lib.callback.await(
+            'free-restaurants:server:setPrice',
+            false,
+            locationData.job,
+            itemId,
+            input[1]
+        )
+        
+        if success then
+            lib.notify({
+                title = 'Price Updated',
+                type = 'success',
+            })
+        else
+            lib.notify({
+                title = 'Update Failed',
+                type = 'error',
+            })
+        end
+    end
+    
+    openPricingMenu(locationKey, locationData)
+end
+
+-- ============================================================================
+-- PAYROLL
+-- ============================================================================
+
+--- Open payroll menu
+---@param locationKey string
+---@param locationData table
+local function openPayrollMenu(locationKey, locationData)
+    local jobConfig = Config.Jobs[locationData.job]
+    local options = {}
+    
+    for grade, gradeData in pairs(jobConfig.grades) do
+        table.insert(options, {
+            title = gradeData.label,
+            description = ('Current Wage: %s'):format(FreeRestaurants.Utils.FormatMoney(gradeData.payment)),
+            icon = 'money-bill',
+            onSelect = function()
+                setWage(grade, gradeData, locationKey, locationData)
+            end,
+        })
+    end
+    
+    lib.registerContext({
+        id = 'payroll_menu',
+        title = 'Payroll Settings',
+        menu = 'management_menu',
+        options = options,
+    })
+    
+    lib.showContext('payroll_menu')
+end
+
+--- Set wage for grade
+local function setWage(grade, gradeData, locationKey, locationData)
+    local input = lib.inputDialog('Set Wage: ' .. gradeData.label, {
+        {
+            type = 'number',
+            label = 'Wage per paycheck',
+            default = gradeData.payment,
+            min = 0,
+        },
+    })
+    
+    if input and input[1] then
+        local success = lib.callback.await(
+            'free-restaurants:server:setWage',
+            false,
+            locationData.job,
+            grade,
+            input[1]
+        )
+        
+        if success then
+            lib.notify({
+                title = 'Wage Updated',
+                type = 'success',
+            })
+        else
+            lib.notify({
+                title = 'Update Failed',
+                type = 'error',
+            })
+        end
+    end
+    
+    openPayrollMenu(locationKey, locationData)
+end
+
+-- ============================================================================
+-- BUSINESS STORAGE
+-- ============================================================================
+
+--- Open business storage
+---@param locationKey string
+---@param locationData table
+local function openBusinessStorage(locationKey, locationData)
+    local stashId = ('restaurant_business_%s'):format(locationKey)
+    exports.ox_inventory:openInventory('stash', stashId)
+end
+
+-- ============================================================================
+-- TARGET SETUP
+-- ============================================================================
+
+--- Setup management targets
+local function setupManagementTargets()
+    for restaurantType, locations in pairs(Config.Locations) do
+        if type(locations) == 'table' and restaurantType ~= 'Settings' then
+            for locationId, locationData in pairs(locations) do
+                if type(locationData) == 'table' and locationData.enabled then
+                    local key = ('%s_%s'):format(restaurantType, locationId)
+                    
+                    -- Boss office/management point
+                    if locationData.management then
+                        local mgmtPoint = locationData.management
+                        
+                        exports.ox_target:addBoxZone({
+                            name = ('%s_management'):format(key),
+                            coords = mgmtPoint.coords,
+                            size = mgmtPoint.targetSize or vec3(1.5, 1.5, 2),
+                            rotation = mgmtPoint.heading or 0,
+                            debug = Config.Debug,
+                            options = {
+                                {
+                                    name = 'open_management',
+                                    label = 'Management',
+                                    icon = 'fa-solid fa-briefcase',
+                                    groups = { [locationData.job] = 3 }, -- Grade 3+ (Manager/Owner)
+                                    canInteract = function()
+                                        return FreeRestaurants.Client.IsOnDuty() and canAccessManagement()
+                                    end,
+                                    onSelect = function()
+                                        openManagementMenu(key, locationData)
+                                    end,
+                                },
+                            },
+                        })
+                        
+                        managementTargets[('%s_management'):format(key)] = true
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================================
+-- EVENT HANDLERS
+-- ============================================================================
+
+-- Initialize on ready
+RegisterNetEvent('free-restaurants:client:ready', function()
+    setupManagementTargets()
+end)
+
+-- Command fallback
+RegisterCommand('management', function()
+    local locationKey, locationData = FreeRestaurants.Client.GetCurrentLocation()
+    if locationKey and locationData then
+        openManagementMenu(locationKey, locationData)
+    else
+        lib.notify({
+            title = 'Not in Restaurant',
+            description = 'You must be in a restaurant to access management.',
+            type = 'error',
+        })
+    end
+end, false)
+
+-- ============================================================================
+-- EXPORTS
+-- ============================================================================
+
+exports('OpenManagementMenu', openManagementMenu)
+exports('CanAccessManagement', canAccessManagement)
+
+FreeRestaurants.Utils.Debug('client/management.lua loaded')

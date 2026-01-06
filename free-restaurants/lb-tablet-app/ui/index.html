@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kitchen Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Loading State -->
+        <div id="loading" class="loading-container">
+            <div class="loading-spinner"></div>
+            <p>Loading Kitchen Manager...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error" class="error-container" style="display: none;">
+            <i class="fas fa-exclamation-triangle"></i>
+            <p id="error-message">Not employed at a restaurant</p>
+        </div>
+
+        <!-- Main App -->
+        <div id="main-app" style="display: none;">
+            <!-- Header -->
+            <header class="app-header">
+                <div class="header-left">
+                    <h1 id="restaurant-name">Restaurant</h1>
+                    <span id="duty-badge" class="badge badge-off">Off Duty</span>
+                </div>
+                <div class="header-right">
+                    <button id="refresh-btn" class="icon-btn" title="Refresh">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Navigation Tabs -->
+            <nav class="tab-nav">
+                <button class="tab-btn active" data-tab="dashboard">
+                    <i class="fas fa-home"></i>
+                    <span>Dashboard</span>
+                </button>
+                <button class="tab-btn" data-tab="orders">
+                    <i class="fas fa-receipt"></i>
+                    <span>Orders</span>
+                    <span id="orders-badge" class="tab-badge" style="display: none;">0</span>
+                </button>
+                <button class="tab-btn" data-tab="deliveries">
+                    <i class="fas fa-truck"></i>
+                    <span>Deliveries</span>
+                </button>
+                <button class="tab-btn" data-tab="staff">
+                    <i class="fas fa-users"></i>
+                    <span>Staff</span>
+                </button>
+                <button class="tab-btn" data-tab="finances">
+                    <i class="fas fa-dollar-sign"></i>
+                    <span>Finances</span>
+                </button>
+            </nav>
+
+            <!-- Tab Content -->
+            <main class="tab-content">
+                <!-- Dashboard Tab -->
+                <section id="tab-dashboard" class="tab-panel active">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon orders"><i class="fas fa-clipboard-list"></i></div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="stat-pending">0</span>
+                                <span class="stat-label">Pending Orders</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon cooking"><i class="fas fa-fire"></i></div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="stat-cooking">0</span>
+                                <span class="stat-label">Cooking</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon ready"><i class="fas fa-check-circle"></i></div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="stat-ready">0</span>
+                                <span class="stat-label">Ready</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon money"><i class="fas fa-money-bill-wave"></i></div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="stat-today">$0</span>
+                                <span class="stat-label">Today's Sales</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="section">
+                        <h3>Quick Actions</h3>
+                        <div class="action-grid">
+                            <button id="btn-toggle-duty" class="action-btn">
+                                <i class="fas fa-clock"></i>
+                                <span>Clock In</span>
+                            </button>
+                            <button id="btn-view-orders" class="action-btn">
+                                <i class="fas fa-list"></i>
+                                <span>View Orders</span>
+                            </button>
+                            <button id="btn-request-delivery" class="action-btn">
+                                <i class="fas fa-truck"></i>
+                                <span>New Delivery</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Health Inspection -->
+                    <div class="section">
+                        <h3>Health & Safety</h3>
+                        <div id="inspection-status" class="inspection-card">
+                            <div class="inspection-grade">
+                                <span id="inspection-letter">A</span>
+                            </div>
+                            <div class="inspection-info">
+                                <p><strong>Health Rating:</strong> <span id="inspection-score">100</span>/100</p>
+                                <p><strong>Last Inspection:</strong> <span id="inspection-date">Never</span></p>
+                                <p><strong>Next Inspection:</strong> <span id="next-inspection">Unknown</span></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Staff On Duty -->
+                    <div class="section">
+                        <h3>Staff Status</h3>
+                        <div class="staff-summary">
+                            <div class="staff-stat">
+                                <span id="staff-online" class="staff-count">0</span>
+                                <span class="staff-label">Online</span>
+                            </div>
+                            <div class="staff-stat">
+                                <span id="staff-duty" class="staff-count">0</span>
+                                <span class="staff-label">On Duty</span>
+                            </div>
+                            <div class="staff-stat">
+                                <span id="staff-total" class="staff-count">0</span>
+                                <span class="staff-label">Total</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Player Progression -->
+                    <div class="section">
+                        <h3>Your Progress</h3>
+                        <div class="progression-card">
+                            <div class="level-display">
+                                <span class="level-number" id="player-level">1</span>
+                                <span class="level-label">Chef Level</span>
+                            </div>
+                            <div class="xp-bar-container">
+                                <div class="xp-bar" id="xp-bar" style="width: 0%"></div>
+                                <span class="xp-text" id="xp-text">0 / 100 XP</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Orders Tab -->
+                <section id="tab-orders" class="tab-panel">
+                    <div class="orders-header">
+                        <h2>Order Queue</h2>
+                        <div class="order-filters">
+                            <button class="filter-btn active" data-filter="all">All</button>
+                            <button class="filter-btn" data-filter="pending">Pending</button>
+                            <button class="filter-btn" data-filter="in_progress">Cooking</button>
+                            <button class="filter-btn" data-filter="ready">Ready</button>
+                        </div>
+                    </div>
+                    <div id="orders-list" class="orders-list">
+                        <p class="empty-state">No orders at this time</p>
+                    </div>
+                </section>
+
+                <!-- Deliveries Tab -->
+                <section id="tab-deliveries" class="tab-panel">
+                    <div class="section">
+                        <h2>Active Delivery</h2>
+                        <div id="active-delivery" class="delivery-card active-delivery">
+                            <p class="empty-state">No active delivery</p>
+                        </div>
+                    </div>
+                    <div class="section">
+                        <h2>Available Deliveries</h2>
+                        <div id="available-deliveries" class="deliveries-list">
+                            <p class="empty-state">No deliveries available</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Staff Tab -->
+                <section id="tab-staff" class="tab-panel">
+                    <div class="staff-header">
+                        <h2>Employee Management</h2>
+                        <button id="btn-hire" class="btn btn-primary">
+                            <i class="fas fa-user-plus"></i> Hire
+                        </button>
+                    </div>
+                    <div id="employees-list" class="employees-list">
+                        <p class="empty-state">No employees found</p>
+                    </div>
+                </section>
+
+                <!-- Finances Tab -->
+                <section id="tab-finances" class="tab-panel">
+                    <div class="finance-summary">
+                        <div class="balance-card">
+                            <h3>Business Balance</h3>
+                            <span class="balance-amount" id="business-balance">$0</span>
+                        </div>
+                        <div class="finance-actions">
+                            <button id="btn-withdraw" class="btn btn-secondary">
+                                <i class="fas fa-arrow-down"></i> Withdraw
+                            </button>
+                            <button id="btn-deposit" class="btn btn-primary">
+                                <i class="fas fa-arrow-up"></i> Deposit
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Sales Overview</h3>
+                        <div class="sales-stats">
+                            <div class="sales-stat">
+                                <span class="sales-label">Today</span>
+                                <span class="sales-value" id="sales-today">$0</span>
+                            </div>
+                            <div class="sales-stat">
+                                <span class="sales-label">This Week</span>
+                                <span class="sales-value" id="sales-week">$0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Stock Orders</h3>
+                        <button id="btn-order-stock" class="btn btn-full">
+                            <i class="fas fa-boxes"></i> Order Supplies
+                        </button>
+                    </div>
+
+                    <div class="section">
+                        <h3>Recent Transactions</h3>
+                        <div id="transactions-list" class="transactions-list">
+                            <p class="empty-state">No recent transactions</p>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal-overlay" class="modal-overlay" style="display: none;">
+        <div id="modal-container" class="modal-container">
+            <!-- Modal content injected by JS -->
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
