@@ -363,8 +363,12 @@ end
 ---@param permission string Permission key from jobs.lua
 ---@return boolean
 local function hasPermission(permission)
+    print(('[free-restaurants] >>> hasPermission CALLED with: %s'):format(permission))
+
     local job = getPlayerState('job')
     local grade = getPlayerState('grade') or 0
+
+    print(('[free-restaurants] hasPermission: job=%s, grade=%s'):format(tostring(job), tostring(grade)))
 
     if not job or not Config.Jobs[job] then
         print(('[free-restaurants] hasPermission(%s): no job or job not in Config.Jobs'):format(permission))
@@ -372,6 +376,7 @@ local function hasPermission(permission)
     end
 
     local gradeData = Config.Jobs[job].grades[grade]
+    print(('[free-restaurants] hasPermission: gradeData exists = %s'):format(tostring(gradeData ~= nil)))
 
     -- If grade doesn't exist in config, fall back to highest available grade
     if not gradeData then
@@ -381,6 +386,7 @@ local function hasPermission(permission)
                 maxGrade = g
             end
         end
+        print(('[free-restaurants] hasPermission: maxGrade found = %d'):format(maxGrade))
         if maxGrade >= 0 then
             gradeData = Config.Jobs[job].grades[maxGrade]
             print(('[free-restaurants] hasPermission(%s): grade %d not found, using highest grade %d'):format(permission, grade, maxGrade))
@@ -391,6 +397,9 @@ local function hasPermission(permission)
         print(('[free-restaurants] hasPermission(%s): no grade data available'):format(permission))
         return false
     end
+
+    -- Debug: print all permissions
+    print(('[free-restaurants] hasPermission: checking permissions table, all=%s'):format(tostring(gradeData.permissions.all)))
 
     -- Check for "all" permission (owner/admin access)
     if gradeData.permissions.all == true then
