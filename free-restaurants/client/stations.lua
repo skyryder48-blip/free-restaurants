@@ -42,6 +42,7 @@ local hideStationHUD
 local getAvailableRecipes
 local canCraftRecipe
 local startCookingAtSlot
+local onStationSlotSelected
 
 -- ============================================================================
 -- FOOD PROP DEFINITIONS
@@ -1173,9 +1174,9 @@ end
 ---@param slotIndex number
 ---@param stationData table
 ---@param stationTypeConfig table
-local function onStationSlotSelected(locationKey, stationKey, slotIndex, stationData, stationTypeConfig)
+onStationSlotSelected = function(locationKey, stationKey, slotIndex, stationData, stationTypeConfig)
     local fullStationKey = ('%s_%s'):format(locationKey, stationKey)
-    
+
     -- Show recipe selection menu
     local recipes = getAvailableRecipes(stationData.type)
     
