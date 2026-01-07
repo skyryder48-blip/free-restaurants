@@ -1234,6 +1234,25 @@ getAvailableRecipes = function(stationType)
     -- Recipes are stored in Config.Recipes.Items
     local recipeItems = Config.Recipes and Config.Recipes.Items or {}
 
+    -- Debug: Check if recipes are loaded
+    local recipeCount = 0
+    for _ in pairs(recipeItems) do
+        recipeCount = recipeCount + 1
+    end
+    print(('[free-restaurants] getAvailableRecipes: checking %d recipes for station type: %s'):format(recipeCount, stationType))
+
+    if recipeCount == 0 then
+        print('[free-restaurants] WARNING: No recipes loaded in Config.Recipes.Items!')
+        if not Config.Recipes then
+            print('[free-restaurants] ERROR: Config.Recipes is nil')
+        else
+            print('[free-restaurants] Config.Recipes exists, available keys:')
+            for k, _ in pairs(Config.Recipes) do
+                print(('  - %s'):format(tostring(k)))
+            end
+        end
+    end
+
     for recipeId, recipe in pairs(recipeItems) do
         if recipeUsesStation(recipe, stationType) then
             -- Check level requirements
@@ -1254,11 +1273,12 @@ getAvailableRecipes = function(stationType)
                 recipeCopy.cookTime = totalTime
 
                 table.insert(recipes, recipeCopy)
+                print(('[free-restaurants] Recipe matched: %s for station %s'):format(recipeId, stationType))
             end
         end
     end
 
-    FreeRestaurants.Utils.Debug(('Found %d recipes for station type: %s'):format(#recipes, stationType))
+    print(('[free-restaurants] Found %d recipes for station type: %s'):format(#recipes, stationType))
     return recipes
 end
 

@@ -372,8 +372,23 @@ local function hasPermission(permission)
     end
 
     local gradeData = Config.Jobs[job].grades[grade]
+
+    -- If grade doesn't exist in config, fall back to highest available grade
+    if not gradeData then
+        local maxGrade = -1
+        for g, _ in pairs(Config.Jobs[job].grades) do
+            if type(g) == 'number' and g > maxGrade then
+                maxGrade = g
+            end
+        end
+        if maxGrade >= 0 then
+            gradeData = Config.Jobs[job].grades[maxGrade]
+            print(('[free-restaurants] hasPermission(%s): grade %d not found, using highest grade %d'):format(permission, grade, maxGrade))
+        end
+    end
+
     if not gradeData or not gradeData.permissions then
-        print(('[free-restaurants] hasPermission(%s): no grade data for grade %d'):format(permission, grade))
+        print(('[free-restaurants] hasPermission(%s): no grade data available'):format(permission))
         return false
     end
 

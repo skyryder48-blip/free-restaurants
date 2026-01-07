@@ -445,9 +445,9 @@ local registeredStashes = {}
 RegisterNetEvent('free-restaurants:server:openStorage', function(stashId, stashData)
     local source = source
 
-    -- Check if player is on duty
-    local pData = playerData[source]
-    if not pData or not pData.onDuty then
+    -- Check if player is on duty using the duty system export
+    local isOnDuty = exports['free-restaurants']:IsOnDuty(source)
+    if not isOnDuty then
         TriggerClientEvent('ox_lib:notify', source, {
             title = 'Access Denied',
             description = 'You must be on duty to access storage.',
