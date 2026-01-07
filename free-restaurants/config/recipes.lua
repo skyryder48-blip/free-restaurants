@@ -3067,6 +3067,296 @@ Config.Recipes.Items = {
         
         levelRequired = 75,
     },
+
+    -- ========================================================================
+    -- TACO FARMER MENU (Mexican Restaurant)
+    -- ========================================================================
+
+    ['carne_asada_taco'] = {
+        label = 'Carne Asada Taco',
+        description = 'Grilled steak taco with onions and cilantro.',
+
+        restaurantTypes = { 'mexican' },
+        categories = { 'mexican' },
+        tier = 'basic',
+
+        result = {
+            item = 'carne_asada_taco',
+            count = 1,
+        },
+
+        basePrice = 4,
+
+        ingredients = {
+            { item = 'corn_tortilla', count = 1 },
+            { item = 'steak', count = 1 },
+            { item = 'onion', count = 1 },
+            { item = 'cilantro', count = 1 },
+        },
+
+        stations = {
+            { type = 'grill', step = 'grill_steak', duration = 8000 },
+            { type = 'taco_station', step = 'assemble', duration = 3000 },
+        },
+
+        effects = {
+            hunger = 20,
+            thirst = -5,
+        },
+
+        levelRequired = 0,
+    },
+
+    ['chicken_taco'] = {
+        label = 'Chicken Taco',
+        description = 'Seasoned grilled chicken taco with salsa.',
+
+        restaurantTypes = { 'mexican' },
+        categories = { 'mexican', 'chicken' },
+        tier = 'basic',
+
+        result = {
+            item = 'chicken_taco',
+            count = 1,
+        },
+
+        basePrice = 3,
+
+        ingredients = {
+            { item = 'corn_tortilla', count = 1 },
+            { item = 'chicken_breast', count = 1 },
+            { item = 'salsa', count = 1 },
+        },
+
+        stations = {
+            { type = 'grill', step = 'grill_chicken', duration = 7000 },
+            { type = 'taco_station', step = 'assemble', duration = 3000 },
+        },
+
+        effects = {
+            hunger = 18,
+            thirst = -5,
+        },
+
+        levelRequired = 0,
+    },
+
+    ['carnitas_taco'] = {
+        label = 'Carnitas Taco',
+        description = 'Slow-cooked pulled pork taco with lime.',
+
+        restaurantTypes = { 'mexican' },
+        categories = { 'mexican' },
+        tier = 'standard',
+
+        result = {
+            item = 'carnitas_taco',
+            count = 1,
+        },
+
+        basePrice = 5,
+
+        ingredients = {
+            { item = 'corn_tortilla', count = 1 },
+            { item = 'pork', count = 1 },
+            { item = 'onion', count = 1 },
+            { item = 'lime', count = 1 },
+        },
+
+        stations = {
+            { type = 'prep_counter', step = 'season_pork', duration = 3000 },
+            { type = 'grill', step = 'cook_pork', duration = 10000 },
+            { type = 'taco_station', step = 'assemble', duration = 4000 },
+        },
+
+        effects = {
+            hunger = 25,
+            thirst = -5,
+        },
+
+        levelRequired = 5,
+    },
+
+    ['burrito'] = {
+        label = 'Burrito',
+        description = 'Large flour tortilla stuffed with rice, beans, and meat.',
+
+        restaurantTypes = { 'mexican' },
+        categories = { 'mexican' },
+        tier = 'standard',
+
+        result = {
+            item = 'burrito',
+            count = 1,
+        },
+
+        basePrice = 8,
+
+        ingredients = {
+            { item = 'flour_tortilla', count = 1 },
+            { item = 'rice', count = 1 },
+            { item = 'beans', count = 1 },
+            { item = 'steak', count = 1 },
+            { item = 'cheese_slice', count = 1 },
+            { item = 'sour_cream', count = 1 },
+        },
+
+        stations = {
+            { type = 'grill', step = 'grill_steak', duration = 8000 },
+            { type = 'prep_counter', step = 'prepare_fillings', duration = 4000 },
+            { type = 'taco_station', step = 'wrap_burrito', duration = 5000 },
+        },
+
+        effects = {
+            hunger = 45,
+            thirst = -10,
+        },
+
+        levelRequired = 10,
+    },
+
+    ['quesadilla'] = {
+        label = 'Quesadilla',
+        description = 'Grilled flour tortilla with melted cheese and meat.',
+
+        restaurantTypes = { 'mexican' },
+        categories = { 'mexican' },
+        tier = 'basic',
+
+        result = {
+            item = 'quesadilla',
+            count = 1,
+        },
+
+        basePrice = 6,
+
+        ingredients = {
+            { item = 'flour_tortilla', count = 2 },
+            { item = 'cheese_slice', count = 2 },
+            { item = 'chicken_breast', count = 1 },
+        },
+
+        stations = {
+            { type = 'grill', step = 'grill_chicken', duration = 6000 },
+            { type = 'grill', step = 'grill_quesadilla', duration = 4000 },
+            { type = 'prep_counter', step = 'slice', duration = 2000 },
+        },
+
+        effects = {
+            hunger = 30,
+            thirst = -5,
+        },
+
+        levelRequired = 0,
+    },
+
+    ['nachos'] = {
+        label = 'Nachos',
+        description = 'Tortilla chips with cheese, jalapeños, and toppings.',
+
+        restaurantTypes = { 'mexican' },
+        categories = { 'mexican', 'appetizers' },
+        tier = 'basic',
+
+        result = {
+            item = 'nachos',
+            count = 1,
+        },
+
+        basePrice = 7,
+
+        ingredients = {
+            { item = 'tortilla_chips', count = 1 },
+            { item = 'cheese_sauce', count = 1 },
+            { item = 'jalapeno', count = 1 },
+            { item = 'sour_cream', count = 1 },
+        },
+
+        stations = {
+            { type = 'prep_counter', step = 'arrange_chips', duration = 3000 },
+            { type = 'grill', step = 'melt_cheese', duration = 4000 },
+            { type = 'taco_station', step = 'add_toppings', duration = 3000 },
+        },
+
+        effects = {
+            hunger = 25,
+            thirst = -10,
+        },
+
+        levelRequired = 0,
+    },
+
+    ['guacamole'] = {
+        label = 'Fresh Guacamole',
+        description = 'Freshly made guacamole with chips.',
+
+        restaurantTypes = { 'mexican' },
+        categories = { 'mexican', 'appetizers' },
+        tier = 'basic',
+
+        result = {
+            item = 'guacamole',
+            count = 1,
+        },
+
+        basePrice = 5,
+
+        ingredients = {
+            { item = 'avocado', count = 2 },
+            { item = 'lime', count = 1 },
+            { item = 'onion', count = 1 },
+            { item = 'cilantro', count = 1 },
+            { item = 'tortilla_chips', count = 1 },
+        },
+
+        stations = {
+            { type = 'prep_counter', step = 'mash_avocado', duration = 4000 },
+            { type = 'prep_counter', step = 'mix_ingredients', duration = 3000 },
+        },
+
+        effects = {
+            hunger = 15,
+            thirst = -5,
+        },
+
+        levelRequired = 0,
+    },
+
+    ['street_corn'] = {
+        label = 'Street Corn (Elote)',
+        description = 'Grilled corn on the cob with mayo, cheese, and lime.',
+
+        restaurantTypes = { 'mexican' },
+        categories = { 'mexican', 'sides' },
+        tier = 'basic',
+
+        result = {
+            item = 'street_corn',
+            count = 1,
+        },
+
+        basePrice = 4,
+
+        ingredients = {
+            { item = 'corn', count = 1 },
+            { item = 'mayo', count = 1 },
+            { item = 'cotija_cheese', count = 1 },
+            { item = 'lime', count = 1 },
+            { item = 'chili_powder', count = 1 },
+        },
+
+        stations = {
+            { type = 'grill', step = 'grill_corn', duration = 6000 },
+            { type = 'prep_counter', step = 'add_toppings', duration = 3000 },
+        },
+
+        effects = {
+            hunger = 15,
+            thirst = -5,
+        },
+
+        levelRequired = 0,
+    },
 }
 
 -- ============================================================================
