@@ -1144,8 +1144,13 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
 end
 
 --- Remove station targets for a location
----@param locationKey string
+---@param locationKey string|nil
 local function removeLocationStationTargets(locationKey)
+    if not locationKey then
+        FreeRestaurants.Utils.Debug('removeLocationStationTargets called with nil locationKey, skipping')
+        return
+    end
+
     local prefix = locationKey .. '_'
     
     for key, _ in pairs(stationTargets) do
@@ -1520,11 +1525,11 @@ end)
 
 -- Clean up stations when leaving a restaurant
 RegisterNetEvent('free-restaurants:client:exitedRestaurant', function(locationKey)
-    FreeRestaurants.Utils.Debug(('Cleaning up stations for: %s'):format(locationKey))
-    
+    FreeRestaurants.Utils.Debug(('Cleaning up stations for: %s'):format(tostring(locationKey)))
+
     -- Hide HUD if visible
     hideStationHUD()
-    
+
     -- Remove targets
     removeLocationStationTargets(locationKey)
 end)
