@@ -1084,18 +1084,26 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
                 local slotState = getSlotState(locationKey, stationKey, slotIndex)
                 local hasCanCook = FreeRestaurants.Client.HasPermission('canCook')
 
+                -- Debug logging
+                print(('[free-restaurants] canInteract check for %s slot %d: onDuty=%s, occupied=%s, canCook=%s'):format(
+                    stationKey, slotIndex, tostring(isOnDuty), tostring(slotState.occupied), tostring(hasCanCook)
+                ))
+
                 -- Check if on duty
                 if not isOnDuty then
+                    print('[free-restaurants] canInteract: FAILED - not on duty')
                     return false
                 end
 
                 -- Check if slot is available
                 if slotState.occupied then
+                    print('[free-restaurants] canInteract: FAILED - slot occupied')
                     return false
                 end
 
                 -- Check if player already using another slot (if not simultaneous)
                 if currentStation and not simultaneousWork then
+                    print('[free-restaurants] canInteract: FAILED - already using station')
                     return false
                 end
 
@@ -1103,10 +1111,12 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
                 local requirements = stationTypeConfig.requirements
                 if requirements and requirements.minGrade and requirements.minGrade > 0 then
                     if not hasCanCook then
+                        print('[free-restaurants] canInteract: FAILED - no canCook permission')
                         return false
                     end
                 end
 
+                print('[free-restaurants] canInteract: PASSED')
                 return true
             end,
             onSelect = function()
