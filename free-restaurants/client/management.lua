@@ -20,6 +20,45 @@
 
 local managementTargets = {}
 local storageTargets = {}
+local cachedGradeData = nil  -- Cache the grade data for permission checks
+
+--- Local helper to check permissions directly from Config (bypasses hasPermission)
+---@param permission string Permission key
+---@return boolean
+local function hasPermission(permission)
+    local job = FreeRestaurants.Client.GetPlayerState('job')
+    local grade = FreeRestaurants.Client.GetPlayerState('grade') or 0
+
+    if not job then return false end
+
+    local jobConfig = Config.Jobs[job]
+    if not jobConfig then return false end
+
+    -- Find grade data with fallback
+    local gradeData = jobConfig.grades[grade]
+    if not gradeData then
+        local maxGrade = -1
+        for g, _ in pairs(jobConfig.grades) do
+            if type(g) == 'number' and g > maxGrade then
+                maxGrade = g
+            end
+        end
+        if maxGrade >= 0 then
+            gradeData = jobConfig.grades[maxGrade]
+        end
+    end
+
+    if not gradeData or not gradeData.permissions then
+        return false
+    end
+
+    -- Owner has all permissions
+    if gradeData.permissions.all == true then
+        return true
+    end
+
+    return gradeData.permissions[permission] == true
+end
 
 -- ============================================================================
 -- STORAGE SYSTEM
@@ -104,7 +143,7 @@ end
 local function canAccessManagement()
     local isOnDuty = FreeRestaurants.Client.IsOnDuty()
     local job = FreeRestaurants.Client.GetPlayerState('job')
-    local grade = FreeRestaurants.Client.GetPlayerState('grade')
+    local grade = FreeRestaurants.Client.GetPlayerState('grade') or 0
 
     print(('[free-restaurants] canAccessManagement check: onDuty=%s, job=%s, grade=%s'):format(
         tostring(isOnDuty), tostring(job), tostring(grade)
@@ -115,12 +154,42 @@ local function canAccessManagement()
         return false
     end
 
-    -- Debug: Check what HasPermission function we have
-    print(('[free-restaurants] HasPermission function type: %s'):format(type(FreeRestaurants.Client.HasPermission)))
+    -- Direct permission check (bypasses hasPermission issue)
+    local jobConfig = Config.Jobs[job]
+    if not jobConfig then
+        print('[free-restaurants] Access denied: job not in Config.Jobs')
+        return false
+    end
 
-    local hasFinances = FreeRestaurants.Client.HasPermission('canAccessFinances')
-    local hasHire = FreeRestaurants.Client.HasPermission('canHire')
-    local hasFire = FreeRestaurants.Client.HasPermission('canFire')
+    -- Find the grade data, with fallback to highest grade
+    local gradeData = jobConfig.grades[grade]
+    if not gradeData then
+        local maxGrade = -1
+        for g, _ in pairs(jobConfig.grades) do
+            if type(g) == 'number' and g > maxGrade then
+                maxGrade = g
+            end
+        end
+        if maxGrade >= 0 then
+            gradeData = jobConfig.grades[maxGrade]
+            print(('[free-restaurants] Using fallback grade %d instead of %d'):format(maxGrade, grade))
+        end
+    end
+
+    if not gradeData or not gradeData.permissions then
+        print('[free-restaurants] Access denied: no grade permissions found')
+        return false
+    end
+
+    -- Check for all=true (owner access)
+    if gradeData.permissions.all == true then
+        print('[free-restaurants] Access granted: owner has all permissions')
+        return true
+    end
+
+    local hasFinances = gradeData.permissions.canAccessFinances == true
+    local hasHire = gradeData.permissions.canHire == true
+    local hasFire = gradeData.permissions.canFire == true
 
     print(('[free-restaurants] Permissions: finances=%s, hire=%s, fire=%s'):format(
         tostring(hasFinances), tostring(hasHire), tostring(hasFire)
@@ -157,8 +226,8 @@ local function openManagementMenu(locationKey, locationData)
     })
     
     -- Employee Management
-    if FreeRestaurants.Client.HasPermission('canHire') or 
-       FreeRestaurants.Client.HasPermission('canFire') then
+    if hasPermission('canHire') or 
+       hasPermission('canFire') then
         table.insert(options, {
             title = 'Employee Management',
             description = 'Hire, fire, and manage staff',
@@ -170,7 +239,7 @@ local function openManagementMenu(locationKey, locationData)
     end
     
     -- Finances
-    if FreeRestaurants.Client.HasPermission('canAccessFinances') then
+    if hasPermission('canAccessFinances') then
         table.insert(options, {
             title = 'Finances',
             description = 'View and manage business funds',
@@ -182,7 +251,7 @@ local function openManagementMenu(locationKey, locationData)
     end
     
     -- Stock Management
-    if FreeRestaurants.Client.HasPermission('canOrderStock') then
+    if hasPermission('canOrderStock') then
         table.insert(options, {
             title = 'Stock Orders',
             description = 'Order supplies and ingredients',
@@ -194,7 +263,7 @@ local function openManagementMenu(locationKey, locationData)
     end
     
     -- Menu Pricing
-    if FreeRestaurants.Client.HasPermission('canEditMenu') then
+    if hasPermission('canEditMenu') then
         table.insert(options, {
             title = 'Menu Pricing',
             description = 'Adjust menu prices',
@@ -206,7 +275,7 @@ local function openManagementMenu(locationKey, locationData)
     end
     
     -- Payroll
-    if FreeRestaurants.Client.HasPermission('canSetWages') then
+    if hasPermission('canSetWages') then
         table.insert(options, {
             title = 'Payroll Settings',
             description = 'Configure employee wages',
@@ -299,7 +368,7 @@ local function openEmployeeMenu(locationKey, locationData)
     end
     
     -- Hire option
-    if FreeRestaurants.Client.HasPermission('canHire') then
+    if hasPermission('canHire') then
         table.insert(options, {
             title = 'Hire New Employee',
             description = 'Hire a nearby player',
@@ -341,7 +410,7 @@ local function openEmployeeActions(employee, locationKey, locationData)
     })
     
     -- Promote
-    if FreeRestaurants.Client.HasPermission('canHire') and employee.grade < maxGrade then
+    if hasPermission('canHire') and employee.grade < maxGrade then
         table.insert(options, {
             title = 'Promote',
             description = 'Increase employee grade',
@@ -353,7 +422,7 @@ local function openEmployeeActions(employee, locationKey, locationData)
     end
     
     -- Demote
-    if FreeRestaurants.Client.HasPermission('canFire') and employee.grade > 0 then
+    if hasPermission('canFire') and employee.grade > 0 then
         table.insert(options, {
             title = 'Demote',
             description = 'Decrease employee grade',
@@ -365,7 +434,7 @@ local function openEmployeeActions(employee, locationKey, locationData)
     end
     
     -- Set specific grade
-    if FreeRestaurants.Client.HasPermission('canHire') then
+    if hasPermission('canHire') then
         table.insert(options, {
             title = 'Set Grade',
             description = 'Set specific grade level',
@@ -377,7 +446,7 @@ local function openEmployeeActions(employee, locationKey, locationData)
     end
     
     -- Fire
-    if FreeRestaurants.Client.HasPermission('canFire') then
+    if hasPermission('canFire') then
         table.insert(options, {
             title = 'Fire Employee',
             description = 'Terminate employment',
