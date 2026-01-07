@@ -115,6 +115,9 @@ local function canAccessManagement()
         return false
     end
 
+    -- Debug: Check what HasPermission function we have
+    print(('[free-restaurants] HasPermission function type: %s'):format(type(FreeRestaurants.Client.HasPermission)))
+
     local hasFinances = FreeRestaurants.Client.HasPermission('canAccessFinances')
     local hasHire = FreeRestaurants.Client.HasPermission('canHire')
     local hasFire = FreeRestaurants.Client.HasPermission('canFire')
