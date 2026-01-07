@@ -366,17 +366,26 @@ local function hasPermission(permission)
     local job = getPlayerState('job')
     local grade = getPlayerState('grade') or 0
 
-    if not job or not Config.Jobs[job] then return false end
+    if not job or not Config.Jobs[job] then
+        print(('[free-restaurants] hasPermission(%s): no job or job not in Config.Jobs'):format(permission))
+        return false
+    end
 
     local gradeData = Config.Jobs[job].grades[grade]
-    if not gradeData or not gradeData.permissions then return false end
+    if not gradeData or not gradeData.permissions then
+        print(('[free-restaurants] hasPermission(%s): no grade data for grade %d'):format(permission, grade))
+        return false
+    end
 
     -- Check for "all" permission (owner/admin access)
     if gradeData.permissions.all == true then
+        print(('[free-restaurants] hasPermission(%s): granted via all=true'):format(permission))
         return true
     end
 
-    return gradeData.permissions[permission] == true
+    local result = gradeData.permissions[permission] == true
+    print(('[free-restaurants] hasPermission(%s): %s'):format(permission, tostring(result)))
+    return result
 end
 
 -- ============================================================================

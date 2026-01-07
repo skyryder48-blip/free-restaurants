@@ -37,6 +37,12 @@ local hudVisible = false            -- HUD visibility state
 -- Prop model cache to avoid repeated streaming requests
 local modelCache = {}
 
+-- Forward declarations for functions used before definition
+local hideStationHUD
+local getAvailableRecipes
+local canCraftRecipe
+local startCookingAtSlot
+
 -- ============================================================================
 -- FOOD PROP DEFINITIONS
 -- ============================================================================
@@ -955,7 +961,7 @@ local function showStationHUD(stationKey, stationType, capacity)
 end
 
 --- Hide the station HUD
-local function hideStationHUD()
+hideStationHUD = function()
     if not hudVisible then return end
 
     hudVisible = false
@@ -1222,7 +1228,7 @@ end
 --- Get available recipes for a station type
 ---@param stationType string
 ---@return table recipes
-local function getAvailableRecipes(stationType)
+getAvailableRecipes = function(stationType)
     local recipes = {}
 
     -- Recipes are stored in Config.Recipes.Items
@@ -1260,7 +1266,7 @@ end
 ---@param recipe table
 ---@return boolean canCraft
 ---@return string? reason
-local function canCraftRecipe(recipe)
+canCraftRecipe = function(recipe)
     if not recipe.ingredients then
         return true, nil
     end
@@ -1287,12 +1293,12 @@ end
 ---@param recipe table
 ---@param stationData table
 ---@param stationTypeConfig table
-local function startCookingAtSlot(locationKey, stationKey, slotIndex, recipe, stationData, stationTypeConfig)
+startCookingAtSlot = function(locationKey, stationKey, slotIndex, recipe, stationData, stationTypeConfig)
     local fullStationKey = ('%s_%s'):format(locationKey, stationKey)
-    
+
     -- Claim the slot on server
     local success = claimSlot(locationKey, stationKey, slotIndex, recipe.id)
-    
+
     if not success then
         lib.notify({
             title = 'Slot Unavailable',
@@ -1301,10 +1307,10 @@ local function startCookingAtSlot(locationKey, stationKey, slotIndex, recipe, st
         })
         return
     end
-    
+
     -- Show HUD
     showStationHUD(fullStationKey, stationData.type, stationTypeConfig.capacity.slots or 1)
-    
+
     -- Get slot position for prop/particle placement
     local slotPositions = calculateSlotPositions(
         stationData.coords,
@@ -1313,11 +1319,11 @@ local function startCookingAtSlot(locationKey, stationKey, slotIndex, recipe, st
         stationData.heading or 0.0
     )
     local slotPos = slotPositions[slotIndex]
-    
+
     -- Spawn initial prop (raw state)
     local propType = recipe.propType or recipe.id
     spawnFoodProp(fullStationKey, slotIndex, propType, 'raw', slotPos.coords, slotPos.heading)
-    
+
     -- Trigger cooking workflow in cooking.lua
     TriggerEvent('free-restaurants:client:startCrafting', recipe.id, recipe, {
         locationKey = locationKey,
