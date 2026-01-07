@@ -1072,36 +1072,40 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
     for slotIndex = 1, numSlots do
         table.insert(targetOptions, {
             name = ('%s_slot_%d'):format(fullStationKey, slotIndex),
-            label = numSlots > 1 
+            label = numSlots > 1
                 and ('Use %s (Slot %d)'):format(stationData.label, slotIndex)
                 or ('Use %s'):format(stationData.label),
             icon = 'fa-solid fa-fire-burner',
-            groups = stationData.job and { [stationData.job] = 0 } or nil,
+            -- Removed groups filter - canInteract checks duty status instead
             canInteract = function()
+                -- Debug: Log all checks
+                local isOnDuty = FreeRestaurants.Client.IsOnDuty()
+                local slotState = getSlotState(locationKey, stationKey, slotIndex)
+                local hasCanCook = FreeRestaurants.Client.HasPermission('canCook')
+
                 -- Check if on duty
-                if not FreeRestaurants.Client.IsOnDuty() then
+                if not isOnDuty then
                     return false
                 end
-                
+
                 -- Check if slot is available
-                local slotState = getSlotState(locationKey, stationKey, slotIndex)
                 if slotState.occupied then
                     return false
                 end
-                
+
                 -- Check if player already using another slot (if not simultaneous)
                 if currentStation and not simultaneousWork then
                     return false
                 end
-                
-                -- Check permissions
+
+                -- Check permissions - skip if minGrade is 0 (falsy) or not set
                 local requirements = stationTypeConfig.requirements
-                if requirements then
-                    if requirements.minGrade and not FreeRestaurants.Client.HasPermission('canCook') then
+                if requirements and requirements.minGrade and requirements.minGrade > 0 then
+                    if not hasCanCook then
                         return false
                     end
                 end
-                
+
                 return true
             end,
             onSelect = function()
