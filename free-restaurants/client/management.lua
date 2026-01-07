@@ -32,9 +32,8 @@ local storageTargets = {}
 local function openStorage(storageKey, storageData, locationKey)
     local stashId = ('restaurant_%s_%s'):format(locationKey, storageKey)
 
-    -- Register the stash if it doesn't exist
-    exports.ox_inventory:openInventory('stash', {
-        id = stashId,
+    -- Request server to open/create the stash
+    TriggerServerEvent('free-restaurants:server:openStorage', stashId, {
         label = storageData.label or 'Storage',
         slots = storageData.slots or 50,
         weight = storageData.weight or 100000,
@@ -103,14 +102,28 @@ end
 --- Check if player can access management menu
 ---@return boolean
 local function canAccessManagement()
-    if not FreeRestaurants.Client.IsOnDuty() then
+    local isOnDuty = FreeRestaurants.Client.IsOnDuty()
+    local job = FreeRestaurants.Client.GetPlayerState('job')
+    local grade = FreeRestaurants.Client.GetPlayerState('grade')
+
+    print(('[free-restaurants] canAccessManagement check: onDuty=%s, job=%s, grade=%s'):format(
+        tostring(isOnDuty), tostring(job), tostring(grade)
+    ))
+
+    if not isOnDuty then
+        print('[free-restaurants] Access denied: not on duty')
         return false
     end
-    
-    -- Check for boss permission
-    return FreeRestaurants.Client.HasPermission('canAccessFinances') or
-           FreeRestaurants.Client.HasPermission('canHire') or
-           FreeRestaurants.Client.HasPermission('canFire')
+
+    local hasFinances = FreeRestaurants.Client.HasPermission('canAccessFinances')
+    local hasHire = FreeRestaurants.Client.HasPermission('canHire')
+    local hasFire = FreeRestaurants.Client.HasPermission('canFire')
+
+    print(('[free-restaurants] Permissions: finances=%s, hire=%s, fire=%s'):format(
+        tostring(hasFinances), tostring(hasHire), tostring(hasFire)
+    ))
+
+    return hasFinances or hasHire or hasFire
 end
 
 -- ============================================================================

@@ -435,6 +435,38 @@ AddEventHandler('onResourceStart', function(resourceName)
 end)
 
 -- ============================================================================
+-- STORAGE SYSTEM
+-- ============================================================================
+
+-- Track registered stashes to avoid re-registering
+local registeredStashes = {}
+
+--- Handle storage open request from client
+RegisterNetEvent('free-restaurants:server:openStorage', function(stashId, stashData)
+    local source = source
+
+    -- Check if player is on duty
+    local pData = playerData[source]
+    if not pData or not pData.onDuty then
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Access Denied',
+            description = 'You must be on duty to access storage.',
+            type = 'error',
+        })
+        return
+    end
+
+    -- Register stash if not already registered
+    if not registeredStashes[stashId] then
+        exports.ox_inventory:RegisterStash(stashId, stashData.label or 'Storage', stashData.slots or 50, stashData.weight or 100000, nil, stashData.groups)
+        registeredStashes[stashId] = true
+    end
+
+    -- Open the stash for the player
+    exports.ox_inventory:forceOpenInventory(source, 'stash', stashId)
+end)
+
+-- ============================================================================
 -- EXPORTS
 -- ============================================================================
 
