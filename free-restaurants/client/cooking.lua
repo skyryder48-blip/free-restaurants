@@ -91,49 +91,68 @@ end
 --- Execute a skill check
 ---@param action string Action type (prep, cook, plate, etc.)
 ---@param difficulty string Difficulty level
+---@param recipeSkillCheck table|nil Optional recipe-specific skill check config
 ---@return boolean success
 ---@return number quality Quality multiplier (0.0-1.0)
-local function doSkillCheck(action, difficulty)
+local function doSkillCheck(action, difficulty, recipeSkillCheck)
     local settings = Config.Cooking.SkillChecks
-    
-    -- Check if skill checks are enabled
+
+    -- Check if skill checks are enabled globally
     if not settings.enabled then
         return true, 1.0
     end
-    
-    -- Check if this action requires skill check
-    if settings.actions and not settings.actions[action] then
+
+    -- Recipe can override to skip skill check entirely
+    if recipeSkillCheck and recipeSkillCheck.enabled == false then
         return true, 1.0
     end
-    
-    local params = getSkillCheckParams(difficulty)
-    local style = settings.style.type or 'skillbar'
-    
+
+    -- Check if this action requires skill check (unless recipe explicitly enables it)
+    local actionEnabled = recipeSkillCheck and recipeSkillCheck.enabled
+    if not actionEnabled and settings.actions and not settings.actions[action] then
+        return true, 1.0
+    end
+
+    -- Get parameters - recipe config overrides global config
+    local useDifficulty = (recipeSkillCheck and recipeSkillCheck.difficulty) or difficulty
+    local params = getSkillCheckParams(useDifficulty)
+
+    -- Recipe can override individual parameters
+    if recipeSkillCheck then
+        if recipeSkillCheck.areaSize then params.areaSize = recipeSkillCheck.areaSize end
+        if recipeSkillCheck.speedMultiplier then params.speedMultiplier = recipeSkillCheck.speedMultiplier end
+        if recipeSkillCheck.duration then params.duration = recipeSkillCheck.duration end
+    end
+
+    -- Determine skill check style (recipe overrides global)
+    local style = (recipeSkillCheck and recipeSkillCheck.type) or settings.style.type or 'skillbar'
+    local keys = (recipeSkillCheck and recipeSkillCheck.keys) or settings.style.keys or { 'w', 'a', 's', 'd' }
+
     local success, quality = false, 0.5
-    
+
     if style == 'skillbar' then
         success = lib.skillCheck(
             { params.areaSize },
-            { 'w', 'a', 's', 'd' }
+            keys
         )
         quality = success and 1.0 or 0.5
-        
+
     elseif style == 'circle' then
+        local secondSize = (recipeSkillCheck and recipeSkillCheck.areaSize2) or (params.areaSize - 10)
         success = lib.skillCheck(
-            { params.areaSize, params.areaSize - 10 },
+            { params.areaSize, secondSize },
             { 'e' }
         )
         quality = success and 1.0 or 0.5
-        
+
     elseif style == 'keys' then
-        local keys = settings.style.keys or { 'w', 'a', 's', 'd' }
         success = lib.skillCheck(
             { params.areaSize },
             keys
         )
         quality = success and 1.0 or 0.5
     end
-    
+
     return success, quality
 end
 
@@ -243,7 +262,7 @@ end
 ---@return boolean success
 ---@return number quality Final quality multiplier
 executeCraftingSteps = function(recipeData, stationData)
-    local steps = recipeData.steps or { { action = 'cook', label = 'Cooking...' } }
+    local steps = recipeData.steps or recipeData.stations or { { action = 'cook', label = 'Cooking...' } }
     local totalQuality = 0
     local stepCount = #steps
 
@@ -315,14 +334,29 @@ executeCraftingSteps = function(recipeData, stationData)
         
         -- Do skill check if required for this step
         if step.skillCheck ~= false then
-            local action = step.action or 'craft'
+            local action = step.action or step.step or step.type or 'cook'
             local difficulty = getAdjustedDifficulty(playerSkill, recipeData.difficulty or 'medium')
-            
-            local checkSuccess, quality = doSkillCheck(action, difficulty)
-            
+
+            -- Build skill check config from recipe and step overrides
+            -- Priority: step.skillCheck > recipeData.skillCheck > global config
+            local skillCheckConfig = nil
+            if type(step.skillCheck) == 'table' then
+                -- Step has explicit skill check configuration
+                skillCheckConfig = step.skillCheck
+            elseif recipeData.skillCheck then
+                -- Recipe has global skill check configuration
+                skillCheckConfig = recipeData.skillCheck
+            end
+
+            local checkSuccess, quality = doSkillCheck(action, difficulty, skillCheckConfig)
+
             if not checkSuccess then
                 -- Skill check failed
-                if Config.Cooking.SkillChecks.failOnMiss then
+                local failOnMiss = (skillCheckConfig and skillCheckConfig.failOnMiss ~= nil)
+                    and skillCheckConfig.failOnMiss
+                    or Config.Cooking.SkillChecks.failOnMiss
+
+                if failOnMiss then
                     lib.notify({
                         title = 'Failed',
                         description = 'You messed up the ' .. (step.failText or 'process') .. '!',
@@ -334,7 +368,7 @@ executeCraftingSteps = function(recipeData, stationData)
                     quality = 0.5
                 end
             end
-            
+
             totalQuality = totalQuality + quality
         else
             totalQuality = totalQuality + 1.0

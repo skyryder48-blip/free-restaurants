@@ -167,19 +167,19 @@ Config.Recipes.Items = {
     ['bleeder_premium'] = {
         label = 'The Bleeder (Premium)',
         description = 'Our classic burger made with premium fresh ingredients.',
-        
+
         restaurantTypes = { 'fastfood' },
         categories = { 'burgers' },
         tier = 'standard',
-        
+
         result = {
             item = 'bleeder_burger_premium',
             count = 1,
             metadata = { quality = 'premium' },
         },
-        
+
         basePrice = 12,
-        
+
         -- Premium ingredient format with quality requirements
         ingredients = {
             { item = 'burger_bun', count = 1, minQuality = 70, label = 'Fresh Brioche Bun' },
@@ -188,17 +188,34 @@ Config.Recipes.Items = {
             { item = 'tomato_slice', count = 2, minQuality = 75, label = 'Vine-Ripened Tomato' },
             { item = 'special_sauce', count = 1, label = 'House Special Sauce' },
         },
-        
+
+        -- Recipe-level skill check configuration (applies to all steps unless overridden)
+        -- Available options:
+        --   enabled: boolean - Force enable/disable skill checks for this recipe
+        --   difficulty: 'easy'|'medium'|'hard' - Override difficulty
+        --   type: 'skillbar'|'circle'|'keys' - Minigame style
+        --   areaSize: number - Size of the target area (larger = easier)
+        --   areaSize2: number - Second area size (for 'circle' type)
+        --   speedMultiplier: number - How fast the indicator moves
+        --   duration: number - Time limit in ms
+        --   keys: table - Keys used (e.g., {'w','a','s','d'})
+        --   failOnMiss: boolean - Whether failing ends the craft
+        skillCheck = {
+            difficulty = 'medium',
+            type = 'skillbar',
+            areaSize = 40,
+        },
+
         stations = {
             { type = 'grill', step = 'cook_patty', duration = 10000, skillCheck = true },
             { type = 'prep_counter', step = 'assemble', duration = 4000, skillCheck = true },
         },
-        
+
         effects = {
             hunger = 35,
             thirst = -5,
         },
-        
+
         levelRequired = 10,
     },
     
@@ -279,18 +296,18 @@ Config.Recipes.Items = {
     ['beef_tower'] = {
         label = 'Beef Tower',
         description = 'Four patties of pure beef madness. Structural integrity not guaranteed.',
-        
+
         restaurantTypes = { 'fastfood' },
         categories = { 'burgers' },
         tier = 'advanced',
-        
+
         result = {
             item = 'beef_tower_burger',
             count = 1,
         },
-        
+
         basePrice = 18,
-        
+
         ingredients = {
             { item = 'burger_bun', count = 2 },
             { item = 'beef_patty', count = 4 },
@@ -301,13 +318,36 @@ Config.Recipes.Items = {
             { item = 'pickles', count = 2 },
             { item = 'special_sauce', count = 1 },
         },
-        
+
+        -- Per-step skill check configuration - each step can have its own settings
         stations = {
-            { type = 'grill', step = 'cook_patties', duration = 15000, skillCheck = true },
-            { type = 'grill', step = 'cook_bacon', duration = 6000 },
-            { type = 'prep_counter', step = 'assemble', duration = 6000, skillCheck = true },
+            {
+                type = 'grill',
+                step = 'cook_patties',
+                duration = 15000,
+                -- Step-level skill check config (overrides recipe-level)
+                skillCheck = {
+                    difficulty = 'hard',
+                    type = 'circle',
+                    areaSize = 30,
+                    areaSize2 = 20,
+                    failOnMiss = true,
+                },
+            },
+            { type = 'grill', step = 'cook_bacon', duration = 6000, skillCheck = false },
+            {
+                type = 'prep_counter',
+                step = 'assemble',
+                duration = 6000,
+                skillCheck = {
+                    difficulty = 'medium',
+                    type = 'keys',
+                    keys = { 'w', 'a', 's', 'd' },
+                    areaSize = 35,
+                },
+            },
         },
-        
+
         effects = {
             hunger = 75,
             thirst = -20,
