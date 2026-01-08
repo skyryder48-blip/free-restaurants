@@ -22,6 +22,27 @@ local managementTargets = {}
 local storageTargets = {}
 local cachedGradeData = nil  -- Cache the grade data for permission checks
 
+-- Forward declarations for functions used before definition
+local openManagementMenu
+local openEmployeeMenu
+local openEmployeeActions
+local hireEmployee
+local promoteEmployee
+local demoteEmployee
+local setEmployeeGrade
+local fireEmployee
+local openFinancesMenu
+local withdrawFunds
+local depositFunds
+local viewTransactions
+local openStockMenu
+local orderStock
+local openPricingMenu
+local setItemPrice
+local openPayrollMenu
+local setWage
+local openBusinessStorage
+
 --- Local helper to check permissions directly from Config (bypasses hasPermission)
 ---@param permission string Permission key
 ---@return boolean
@@ -205,7 +226,7 @@ end
 --- Open main management menu
 ---@param locationKey string
 ---@param locationData table
-local function openManagementMenu(locationKey, locationData)
+openManagementMenu = function(locationKey, locationData)
     if not canAccessManagement() then
         lib.notify({
             title = 'Access Denied',
@@ -312,7 +333,7 @@ end
 --- Open employee management menu
 ---@param locationKey string
 ---@param locationData table
-local function openEmployeeMenu(locationKey, locationData)
+openEmployeeMenu = function(locationKey, locationData)
     local options = {}
     
     -- Get employee list from server
@@ -393,7 +414,7 @@ end
 ---@param employee table
 ---@param locationKey string
 ---@param locationData table
-local function openEmployeeActions(employee, locationKey, locationData)
+openEmployeeActions = function(employee, locationKey, locationData)
     local options = {}
     local jobConfig = Config.Jobs[locationData.job]
     local maxGrade = 0
@@ -470,7 +491,7 @@ end
 --- Hire a new employee
 ---@param locationKey string
 ---@param locationData table
-local function hireEmployee(locationKey, locationData)
+hireEmployee = function(locationKey, locationData)
     -- Get nearby players
     local nearbyPlayers = lib.callback.await('free-restaurants:server:getNearbyPlayers', false, 10.0)
     
@@ -553,7 +574,7 @@ local function hireEmployee(locationKey, locationData)
 end
 
 --- Promote employee
-local function promoteEmployee(employee, locationKey, locationData)
+promoteEmployee = function(employee, locationKey, locationData)
     local newGrade = employee.grade + 1
     local success = lib.callback.await(
         'free-restaurants:server:setEmployeeGrade',
@@ -580,7 +601,7 @@ local function promoteEmployee(employee, locationKey, locationData)
 end
 
 --- Demote employee
-local function demoteEmployee(employee, locationKey, locationData)
+demoteEmployee = function(employee, locationKey, locationData)
     local newGrade = math.max(0, employee.grade - 1)
     local success = lib.callback.await(
         'free-restaurants:server:setEmployeeGrade',
@@ -607,7 +628,7 @@ local function demoteEmployee(employee, locationKey, locationData)
 end
 
 --- Set specific grade
-local function setEmployeeGrade(employee, locationKey, locationData)
+setEmployeeGrade = function(employee, locationKey, locationData)
     local jobConfig = Config.Jobs[locationData.job]
     local gradeOptions = {}
     
@@ -655,7 +676,7 @@ local function setEmployeeGrade(employee, locationKey, locationData)
 end
 
 --- Fire employee
-local function fireEmployee(employee, locationKey, locationData)
+fireEmployee = function(employee, locationKey, locationData)
     local confirm = lib.alertDialog({
         header = 'Fire Employee',
         content = ('Are you sure you want to fire %s %s?'):format(employee.firstname, employee.lastname),
@@ -695,7 +716,7 @@ end
 --- Open finances menu
 ---@param locationKey string
 ---@param locationData table
-local function openFinancesMenu(locationKey, locationData)
+openFinancesMenu = function(locationKey, locationData)
     -- Get financial data from server
     local finances = lib.callback.await('free-restaurants:server:getFinances', false, locationData.job)
     
@@ -759,7 +780,7 @@ local function openFinancesMenu(locationKey, locationData)
 end
 
 --- Withdraw funds
-local function withdrawFunds(locationKey, locationData, finances)
+withdrawFunds = function(locationKey, locationData, finances)
     local maxWithdraw = finances and finances.balance or 0
     
     local input = lib.inputDialog('Withdraw Funds', {
@@ -798,7 +819,7 @@ local function withdrawFunds(locationKey, locationData, finances)
 end
 
 --- Deposit funds
-local function depositFunds(locationKey, locationData)
+depositFunds = function(locationKey, locationData)
     local input = lib.inputDialog('Deposit Funds', {
         {
             type = 'number',
@@ -833,7 +854,7 @@ local function depositFunds(locationKey, locationData)
 end
 
 --- View transaction history
-local function viewTransactions(locationKey, locationData)
+viewTransactions = function(locationKey, locationData)
     local transactions = lib.callback.await('free-restaurants:server:getTransactions', false, locationData.job)
     
     local options = {}
@@ -879,7 +900,7 @@ end
 --- Open stock ordering menu
 ---@param locationKey string
 ---@param locationData table
-local function openStockMenu(locationKey, locationData)
+openStockMenu = function(locationKey, locationData)
     -- Get available stock items
     local stockItems = lib.callback.await('free-restaurants:server:getStockItems', false, locationData.job)
     
@@ -914,7 +935,7 @@ local function openStockMenu(locationKey, locationData)
 end
 
 --- Order specific stock item
-local function orderStock(item, locationKey, locationData)
+orderStock = function(item, locationKey, locationData)
     local input = lib.inputDialog('Order ' .. item.label, {
         {
             type = 'number',
@@ -970,7 +991,7 @@ end
 --- Open pricing menu
 ---@param locationKey string
 ---@param locationData table
-local function openPricingMenu(locationKey, locationData)
+openPricingMenu = function(locationKey, locationData)
     -- Get current pricing
     local pricing = lib.callback.await('free-restaurants:server:getPricing', false, locationData.job)
     
@@ -1006,7 +1027,7 @@ local function openPricingMenu(locationKey, locationData)
 end
 
 --- Set price for item
-local function setItemPrice(itemId, recipe, currentData, locationKey, locationData)
+setItemPrice = function(itemId, recipe, currentData, locationKey, locationData)
     local basePrice = recipe.price
     local minPrice = math.floor(basePrice * Config.Economy.Pricing.priceFloor)
     local maxPrice = math.floor(basePrice * Config.Economy.Pricing.priceCeiling)
@@ -1057,7 +1078,7 @@ end
 --- Open payroll menu
 ---@param locationKey string
 ---@param locationData table
-local function openPayrollMenu(locationKey, locationData)
+openPayrollMenu = function(locationKey, locationData)
     local jobConfig = Config.Jobs[locationData.job]
     local options = {}
     
@@ -1083,7 +1104,7 @@ local function openPayrollMenu(locationKey, locationData)
 end
 
 --- Set wage for grade
-local function setWage(grade, gradeData, locationKey, locationData)
+setWage = function(grade, gradeData, locationKey, locationData)
     local input = lib.inputDialog('Set Wage: ' .. gradeData.label, {
         {
             type = 'number',
@@ -1125,7 +1146,7 @@ end
 --- Open business storage
 ---@param locationKey string
 ---@param locationData table
-local function openBusinessStorage(locationKey, locationData)
+openBusinessStorage = function(locationKey, locationData)
     local stashId = ('restaurant_business_%s'):format(locationKey)
     exports.ox_inventory:openInventory('stash', stashId)
 end
