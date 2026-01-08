@@ -1,18 +1,21 @@
 --[[
     free-restaurants Server Crafting System
-    
+
     Handles:
     - Recipe validation
     - Ingredient consumption
     - Item creation with quality metadata
     - XP rewards and skill progression
     - Failure handling
-    
+
     DEPENDENCIES:
     - server/main.lua
     - ox_inventory
     - qbx_core
 ]]
+
+-- Forward declarations for functions used before definition
+local calculateLevel
 
 -- ============================================================================
 -- QUALITY SYSTEM
@@ -236,7 +239,7 @@ end
 --- Calculate level from XP
 ---@param xp number
 ---@return number level
-local function calculateLevel(xp)
+calculateLevel = function(xp)
     -- Simple level curve: 100 * level^2 XP per level
     local level = 1
     local xpRequired = 0
