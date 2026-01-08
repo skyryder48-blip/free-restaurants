@@ -68,10 +68,12 @@ local function validateIngredients(source, ingredients)
     local hasAll = true
     local totalFreshness = 0
     local freshnessCount = 0
-    
-    for item, amount in pairs(ingredients) do
+
+    for _, ingredient in ipairs(ingredients) do
+        local item = ingredient.item
+        local amount = ingredient.count or 1
         local count = exports.ox_inventory:Search(source, 'count', item)
-        
+
         if count < amount then
             missing[item] = amount - count
             hasAll = false
@@ -88,9 +90,9 @@ local function validateIngredients(source, ingredients)
             end
         end
     end
-    
+
     local avgFreshness = freshnessCount > 0 and (totalFreshness / freshnessCount) or 100
-    
+
     return hasAll, missing, avgFreshness
 end
 
@@ -99,7 +101,9 @@ end
 ---@param ingredients table { [item] = amount }
 ---@return boolean success
 local function removeIngredients(source, ingredients)
-    for item, amount in pairs(ingredients) do
+    for _, ingredient in ipairs(ingredients) do
+        local item = ingredient.item
+        local amount = ingredient.count or 1
         local removed = exports.ox_inventory:RemoveItem(source, item, amount)
         if not removed then
             return false
@@ -113,7 +117,9 @@ end
 ---@param ingredients table
 ---@param lossPercentage number 0.0 to 1.0
 local function removePartialIngredients(source, ingredients, lossPercentage)
-    for item, amount in pairs(ingredients) do
+    for _, ingredient in ipairs(ingredients) do
+        local item = ingredient.item
+        local amount = ingredient.count or 1
         local lostAmount = math.ceil(amount * lossPercentage)
         if lostAmount > 0 then
             exports.ox_inventory:RemoveItem(source, item, lostAmount)
@@ -289,7 +295,7 @@ lib.callback.register('free-restaurants:server:completeCraft', function(source, 
     if not player then return false, 'Player not found' end
     
     -- Get recipe
-    local recipe = Config.Recipes[recipeId]
+    local recipe = Config.Recipes.Items[recipeId]
     if not recipe then return false, 'Invalid recipe' end
     
     -- Validate can craft
@@ -343,9 +349,9 @@ lib.callback.register('free-restaurants:server:craftFailed', function(source, re
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false end
     
-    local recipe = Config.Recipes[recipeId]
+    local recipe = Config.Recipes.Items[recipeId]
     if not recipe then return false end
-    
+
     -- Remove partial ingredients based on config
     local lossPercentage = Config.Cooking and Config.Cooking.Quality and Config.Cooking.Quality.ingredientWaste or 0.5
     removePartialIngredients(source, recipe.ingredients, lossPercentage)
@@ -365,7 +371,7 @@ lib.callback.register('free-restaurants:server:getAvailableRecipes', function(so
     local restaurantData = exports['free-restaurants']:GetPlayerRestaurantData(player.PlayerData.citizenid)
     local availableRecipes = {}
     
-    for recipeId, recipe in pairs(Config.Recipes) do
+    for recipeId, recipe in pairs(Config.Recipes.Items) do
         -- Check station match
         local stationMatch = false
         if type(recipe.station) == 'table' then
@@ -408,13 +414,16 @@ lib.callback.register('free-restaurants:server:completeBatchCraft', function(sou
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false, 'Player not found' end
     
-    local recipe = Config.Recipes[recipeId]
+    local recipe = Config.Recipes.Items[recipeId]
     if not recipe then return false, 'Invalid recipe' end
-    
+
     -- Calculate ingredients needed for batch
     local batchIngredients = {}
-    for item, qty in pairs(recipe.ingredients) do
-        batchIngredients[item] = qty * amount
+    for _, ingredient in ipairs(recipe.ingredients) do
+        table.insert(batchIngredients, {
+            item = ingredient.item,
+            count = (ingredient.count or 1) * amount
+        })
     end
     
     -- Validate ingredients
@@ -469,9 +478,9 @@ lib.callback.register('free-restaurants:server:unlockRecipe', function(source, r
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false end
     
-    local recipe = Config.Recipes[recipeId]
+    local recipe = Config.Recipes.Items[recipeId]
     if not recipe then return false end
-    
+
     -- Check unlock requirements
     if recipe.unlockCost then
         -- Check if player has money
