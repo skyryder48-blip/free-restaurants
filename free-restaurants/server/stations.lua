@@ -28,6 +28,10 @@ local slotTimeouts = {}
 -- Fire state tracking
 local activeFires = {}  -- [fireKey] = { stage, coords, startTime }
 
+-- Forward declarations for functions used before definition
+local setSlotTimeout
+local clearSlotTimeout
+
 -- Configuration
 local SlotConfig = {
     timeoutDuration = 300000,    -- 5 minutes idle timeout
@@ -288,7 +292,7 @@ end
 ---@param locationKey string
 ---@param stationKey string
 ---@param slotIndex number
-local function setSlotTimeout(playerId, locationKey, stationKey, slotIndex)
+setSlotTimeout = function(playerId, locationKey, stationKey, slotIndex)
     local timeoutKey = getTimeoutKey(locationKey, stationKey, slotIndex)
     
     -- Clear existing timeout
@@ -318,7 +322,7 @@ end
 ---@param locationKey string
 ---@param stationKey string
 ---@param slotIndex number
-local function clearSlotTimeout(locationKey, stationKey, slotIndex)
+clearSlotTimeout = function(locationKey, stationKey, slotIndex)
     local timeoutKey = getTimeoutKey(locationKey, stationKey, slotIndex)
     slotTimeouts[timeoutKey] = nil
 end
