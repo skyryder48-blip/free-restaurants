@@ -243,22 +243,47 @@ end
 ---@return boolean success
 ---@return number quality Final quality multiplier
 executeCraftingSteps = function(recipeData, stationData)
-    local steps = recipeData.steps or { { action = 'craft', label = 'Crafting...' } }
+    local steps = recipeData.steps or { { action = 'cook', label = 'Cooking...' } }
     local totalQuality = 0
     local stepCount = #steps
-    
+
     -- Get player skill level for this recipe type
     local playerSkill = lib.callback.await('free-restaurants:server:getSkillLevel', false, recipeData.category) or 0
-    
+
+    -- Notify stations.lua that cooking is starting
+    TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.slotIndex,
+        stationType = stationData.stationData and stationData.stationData.type or 'grill',
+        slotCoords = stationData.slotCoords,
+        status = 'cooking',
+        progress = 0,
+        quality = 100,
+    })
+
     for i, step in ipairs(steps) do
         -- Show step progress
         local stepLabel = step.label or ('Step %d/%d'):format(i, stepCount)
-        
+
         -- Load animation if specified
         if step.anim then
             lib.requestAnimDict(step.anim.dict)
         end
-        
+
+        -- Update cooking state for particles
+        local stepProgress = math.floor((i - 1) / stepCount * 100)
+        TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+            locationKey = stationData.locationKey,
+            stationKey = stationData.stationKey,
+            slotIndex = stationData.slotIndex,
+            stationType = stationData.stationData and stationData.stationData.type or 'grill',
+            slotCoords = stationData.slotCoords,
+            status = 'cooking',
+            progress = stepProgress,
+            quality = 100,
+        })
+
         -- Play progress bar
         local progressSuccess = lib.progressCircle({
             duration = step.duration or (recipeData.craftTime or 5000) / stepCount,
@@ -318,7 +343,19 @@ executeCraftingSteps = function(recipeData, stationData)
     
     -- Calculate average quality
     local avgQuality = totalQuality / stepCount
-    
+
+    -- Notify stations.lua that cooking is complete
+    TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.slotIndex,
+        stationType = stationData.stationData and stationData.stationData.type or 'grill',
+        slotCoords = stationData.slotCoords,
+        status = 'ready',
+        progress = 100,
+        quality = math.floor(avgQuality * 100),
+    })
+
     return true, avgQuality
 end
 
@@ -489,6 +526,18 @@ local function quickCraft(recipeId, recipeData, stationData)
         ingredientsConsumed = true,
     }
 
+    -- Notify stations.lua that cooking is starting
+    TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.slotIndex,
+        stationType = stationData.stationData and stationData.stationData.type or 'grill',
+        slotCoords = stationData.slotCoords,
+        status = 'cooking',
+        progress = 0,
+        quality = 100,
+    })
+
     -- Simple progress bar
     local success = lib.progressCircle({
         duration = recipeData.craftTime or 3000,
@@ -502,6 +551,17 @@ local function quickCraft(recipeId, recipeData, stationData)
     })
 
     if success then
+        -- Notify stations.lua that cooking is complete
+        TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+            locationKey = stationData.locationKey,
+            stationKey = stationData.stationKey,
+            slotIndex = stationData.slotIndex,
+            stationType = stationData.stationData and stationData.stationData.type or 'grill',
+            slotCoords = stationData.slotCoords,
+            status = 'ready',
+            progress = 100,
+            quality = 100,
+        })
         completeCrafting(1.0) -- Full quality for quick crafts
     else
         failCrafting()
@@ -591,6 +651,18 @@ local function batchCraft(recipeId, recipeData, stationData, amount)
         ingredientsConsumed = true,
     }
 
+    -- Notify stations.lua that cooking is starting
+    TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.slotIndex,
+        stationType = stationData.stationData and stationData.stationData.type or 'grill',
+        slotCoords = stationData.slotCoords,
+        status = 'cooking',
+        progress = 0,
+        quality = 100,
+    })
+
     local totalTime = (recipeData.craftTime or 5000) * amount
 
     -- Progress with updates
@@ -614,6 +686,18 @@ local function batchCraft(recipeId, recipeData, stationData, amount)
     }
 
     if success then
+        -- Notify stations.lua that cooking is complete
+        TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+            locationKey = stationData.locationKey,
+            stationKey = stationData.stationKey,
+            slotIndex = stationData.slotIndex,
+            stationType = stationData.stationData and stationData.stationData.type or 'grill',
+            slotCoords = stationData.slotCoords,
+            status = 'ready',
+            progress = 100,
+            quality = 90, -- Batch is slightly lower quality
+        })
+
         -- Complete batch on server (give items)
         local serverSuccess, message = lib.callback.await(
             'free-restaurants:server:completeBatchCraft',
