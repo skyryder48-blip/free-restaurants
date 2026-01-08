@@ -925,70 +925,27 @@ cleanupSlot = function(stationKey, slotIndex)
 end
 
 -- ============================================================================
--- HUD COMMUNICATION
+-- HUD COMMUNICATION (DISABLED)
 -- ============================================================================
 
---- Show the station HUD
+--- Show the station HUD (disabled)
 ---@param stationKey string
 ---@param stationType string
 ---@param capacity number Number of slots
 local function showStationHUD(stationKey, stationType, capacity)
-    if hudVisible then return end
-
-    hudVisible = true
-
-    SendNUIMessage({
-        type = 'showStationHUD',
-        data = {
-            stationKey = stationKey,
-            stationType = stationType,
-            capacity = capacity,
-            slots = stationSlots[stationKey] or {},
-        },
-    })
-
-    -- Start thread to listen for ESC key to close HUD
-    CreateThread(function()
-        while hudVisible do
-            Wait(0)
-            -- ESC key (CANCEL control / key code 322)
-            if IsControlJustPressed(0, 322) then
-                hideStationHUD()
-                break
-            end
-            -- Also close with Backspace (177)
-            if IsControlJustPressed(0, 177) then
-                hideStationHUD()
-                break
-            end
-        end
-    end)
+    -- HUD disabled
 end
 
---- Hide the station HUD
+--- Hide the station HUD (disabled)
 hideStationHUD = function()
-    if not hudVisible then return end
-
-    hudVisible = false
-
-    SendNUIMessage({
-        type = 'hideStationHUD',
-    })
+    -- HUD disabled
 end
 
---- Update the station HUD with current slot data
+--- Update the station HUD with current slot data (disabled)
 ---@param stationKey string
 ---@param slotData table
 updateStationHUD = function(stationKey, slotData)
-    if not hudVisible then return end
-    
-    SendNUIMessage({
-        type = 'updateSlots',
-        data = {
-            stationKey = stationKey,
-            slots = slotData,
-        },
-    })
+    -- HUD disabled
 end
 
 -- ============================================================================

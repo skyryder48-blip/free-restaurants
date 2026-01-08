@@ -130,6 +130,19 @@ local function removePartialIngredients(source, ingredients, lossPercentage)
     end
 end
 
+--- Return ingredients to player inventory (for cancelled crafting)
+---@param source number
+---@param ingredients table Array of {item, count} objects
+---@return boolean success
+local function returnIngredients(source, ingredients)
+    for _, ingredient in ipairs(ingredients) do
+        local item = ingredient.item
+        local amount = ingredient.count or 1
+        exports.ox_inventory:AddItem(source, item, amount)
+    end
+    return true
+end
+
 -- ============================================================================
 -- ITEM CREATION
 -- ============================================================================
@@ -292,39 +305,56 @@ end
 -- CALLBACKS
 -- ============================================================================
 
---- Complete craft callback
-lib.callback.register('free-restaurants:server:completeCraft', function(source, recipeId, quality, locationKey)
+--- Consume ingredients at start of crafting
+lib.callback.register('free-restaurants:server:consumeIngredients', function(source, recipeId)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false, 'Player not found' end
-    
+
     -- Get recipe
     local recipe = Config.Recipes.Items[recipeId]
     if not recipe then return false, 'Invalid recipe' end
-    
+
     -- Validate can craft
     local canCraft, reason = canCraftRecipe(source, recipe)
     if not canCraft then return false, reason end
-    
+
     -- Validate ingredients
     local hasAll, missing, avgFreshness = validateIngredients(source, recipe.ingredients)
     if not hasAll then return false, 'Missing ingredients' end
-    
-    -- Remove ingredients
+
+    -- Remove ingredients NOW (at start of crafting)
     if not removeIngredients(source, recipe.ingredients) then
         return false, 'Failed to remove ingredients'
     end
-    
-    -- Calculate final quality with freshness
-    local finalQuality = calculateItemQuality(quality, avgFreshness)
-    
+
+    print(('[free-restaurants] Player %s started crafting %s - ingredients consumed'):format(
+        player.PlayerData.citizenid, recipeId
+    ))
+
+    -- Return success and the freshness for quality calculation later
+    return true, avgFreshness
+end)
+
+--- Complete craft callback (ingredients already consumed)
+lib.callback.register('free-restaurants:server:completeCraft', function(source, recipeId, quality, locationKey, avgFreshness)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false, 'Player not found' end
+
+    -- Get recipe
+    local recipe = Config.Recipes.Items[recipeId]
+    if not recipe then return false, 'Invalid recipe' end
+
+    -- Calculate final quality with freshness (passed from consumeIngredients)
+    local finalQuality = calculateItemQuality(quality, avgFreshness or 100)
+
     -- Create item
     if not createCraftedItem(source, recipe, finalQuality) then
         return false, 'Inventory full'
     end
-    
+
     -- Award XP
     local xpAwarded = awardCraftXP(source, recipe, finalQuality)
-    
+
     -- Add to business earnings if configured
     local session = exports['free-restaurants']:GetSession(source)
     if session and recipe.businessValue then
@@ -336,33 +366,32 @@ lib.callback.register('free-restaurants:server:completeCraft', function(source, 
             player.PlayerData.citizenid
         )
     end
-    
+
     -- Track task completion
     exports['free-restaurants']:IncrementTasks(source)
-    
+
     print(('[free-restaurants] Player %s crafted %s (quality: %d, xp: %d)'):format(
         player.PlayerData.citizenid, recipeId, finalQuality, xpAwarded
     ))
-    
+
     return true, nil
 end)
 
---- Craft failed callback
-lib.callback.register('free-restaurants:server:craftFailed', function(source, recipeId, locationKey)
+--- Return ingredients when crafting is cancelled
+lib.callback.register('free-restaurants:server:returnIngredients', function(source, recipeId)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false end
-    
+
     local recipe = Config.Recipes.Items[recipeId]
     if not recipe then return false end
 
-    -- Remove partial ingredients based on config
-    local lossPercentage = Config.Cooking and Config.Cooking.Quality and Config.Cooking.Quality.ingredientWaste or 0.5
-    removePartialIngredients(source, recipe.ingredients, lossPercentage)
-    
-    print(('[free-restaurants] Player %s failed craft: %s'):format(
+    -- Return all ingredients to player
+    returnIngredients(source, recipe.ingredients)
+
+    print(('[free-restaurants] Player %s cancelled craft %s - ingredients returned'):format(
         player.PlayerData.citizenid, recipeId
     ))
-    
+
     return true
 end)
 
@@ -412,11 +441,11 @@ lib.callback.register('free-restaurants:server:getAvailableRecipes', function(so
     return availableRecipes
 end)
 
---- Complete batch craft callback
-lib.callback.register('free-restaurants:server:completeBatchCraft', function(source, recipeId, amount, locationKey)
+--- Consume ingredients for batch crafting at start
+lib.callback.register('free-restaurants:server:consumeBatchIngredients', function(source, recipeId, amount)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false, 'Player not found' end
-    
+
     local recipe = Config.Recipes.Items[recipeId]
     if not recipe then return false, 'Invalid recipe' end
 
@@ -428,47 +457,88 @@ lib.callback.register('free-restaurants:server:completeBatchCraft', function(sou
             count = (ingredient.count or 1) * amount
         })
     end
-    
+
     -- Validate ingredients
     local hasAll, missing, avgFreshness = validateIngredients(source, batchIngredients)
     if not hasAll then return false, 'Missing ingredients' end
-    
-    -- Remove all ingredients
+
+    -- Remove all ingredients NOW
     if not removeIngredients(source, batchIngredients) then
         return false, 'Failed to remove ingredients'
     end
-    
+
+    print(('[free-restaurants] Player %s started batch craft %dx %s - ingredients consumed'):format(
+        player.PlayerData.citizenid, amount, recipeId
+    ))
+
+    return true, avgFreshness
+end)
+
+--- Return batch ingredients when cancelled
+lib.callback.register('free-restaurants:server:returnBatchIngredients', function(source, recipeId, amount)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false end
+
+    local recipe = Config.Recipes.Items[recipeId]
+    if not recipe then return false end
+
+    -- Return all batch ingredients
+    local batchIngredients = {}
+    for _, ingredient in ipairs(recipe.ingredients) do
+        table.insert(batchIngredients, {
+            item = ingredient.item,
+            count = (ingredient.count or 1) * amount
+        })
+    end
+
+    returnIngredients(source, batchIngredients)
+
+    print(('[free-restaurants] Player %s cancelled batch craft %dx %s - ingredients returned'):format(
+        player.PlayerData.citizenid, amount, recipeId
+    ))
+
+    return true
+end)
+
+--- Complete batch craft callback (ingredients already consumed)
+lib.callback.register('free-restaurants:server:completeBatchCraft', function(source, recipeId, amount, locationKey, avgFreshness)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false, 'Player not found' end
+
+    local recipe = Config.Recipes.Items[recipeId]
+    if not recipe then return false, 'Invalid recipe' end
+
     -- Calculate quality (batch crafting is slightly lower quality)
     local batchQualityPenalty = 0.9 -- 90% of normal quality
-    local finalQuality = calculateItemQuality(batchQualityPenalty, avgFreshness)
-    
+    local finalQuality = calculateItemQuality(batchQualityPenalty, avgFreshness or 100)
+
     -- Create items
     local resultItem = type(recipe.result) == 'table' and recipe.result.item or recipe.result
     local resultAmount = type(recipe.result) == 'table' and recipe.result.amount or 1
     local totalItems = resultAmount * amount
-    
+
     local metadata = {
         quality = finalQuality,
         craftedAt = os.time(),
         craftedBy = player.PlayerData.citizenid,
         freshness = finalQuality,
     }
-    
+
     local success = exports.ox_inventory:AddItem(source, resultItem, totalItems, metadata)
     if not success then
         return false, 'Inventory full'
     end
-    
+
     -- Award XP (reduced for batch)
     local baseXP = recipe.xpReward or 10
     local batchXP = math.floor(baseXP * amount * 0.75) -- 75% XP per item in batch
     awardCraftXP(source, recipe, finalQuality)
-    
+
     -- Track tasks
     for i = 1, amount do
         exports['free-restaurants']:IncrementTasks(source)
     end
-    
+
     print(('[free-restaurants] Player %s batch crafted %dx %s'):format(
         player.PlayerData.citizenid, amount, recipeId
     ))
