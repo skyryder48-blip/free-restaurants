@@ -194,38 +194,45 @@ local function startCrafting(recipeId, recipeData, stationData)
         })
         return
     end
-    
-    -- Check ingredients
-    local hasAll, missing = hasIngredients(recipeData.ingredients)
-    if not hasAll then
+
+    -- Consume ingredients FIRST (before progress starts)
+    local consumeSuccess, avgFreshness = lib.callback.await(
+        'free-restaurants:server:consumeIngredients',
+        false,
+        recipeId
+    )
+
+    if not consumeSuccess then
         lib.notify({
-            title = 'Missing Ingredients',
-            description = formatMissingIngredients(missing),
+            title = 'Cannot Craft',
+            description = avgFreshness or 'Missing ingredients',
             type = 'error',
         })
         return
     end
-    
-    -- Start crafting
+
+    -- Ingredients consumed - start crafting
     isCrafting = true
     currentCraft = {
         recipeId = recipeId,
         recipeData = recipeData,
         stationData = stationData,
+        avgFreshness = avgFreshness, -- Store for quality calculation
         qualityMultiplier = 1.0,
         startTime = GetGameTimer(),
+        ingredientsConsumed = true, -- Track that ingredients were taken
     }
-    
-    FreeRestaurants.Utils.Debug(('Starting craft: %s'):format(recipeId))
-    
+
+    FreeRestaurants.Utils.Debug(('Starting craft: %s - ingredients consumed'):format(recipeId))
+
     -- Execute crafting steps
     local success, finalQuality = executeCraftingSteps(recipeData, stationData)
-    
+
     if success then
-        -- Complete crafting on server
+        -- Complete crafting on server (give item)
         completeCrafting(finalQuality)
     else
-        -- Failed crafting
+        -- Cancelled - return ingredients
         failCrafting()
     end
 end
@@ -323,14 +330,16 @@ completeCrafting = function(quality)
     local recipeId = currentCraft.recipeId
     local recipeData = currentCraft.recipeData
     local stationData = currentCraft.stationData
+    local avgFreshness = currentCraft.avgFreshness
 
-    -- Send to server for item creation
+    -- Send to server for item creation (ingredients already consumed)
     local success, message = lib.callback.await(
         'free-restaurants:server:completeCraft',
         false,
         recipeId,
         quality,
-        stationData.locationKey
+        stationData.locationKey,
+        avgFreshness
     )
 
     -- Save station data before clearing for the completion event
@@ -377,12 +386,14 @@ completeCrafting = function(quality)
     TriggerEvent('free-restaurants:client:cookingComplete', completionData)
 end
 
---- Handle failed crafting
+--- Handle failed/cancelled crafting
 failCrafting = function()
     if not currentCraft then return end
 
+    local recipeId = currentCraft.recipeId
     local recipeData = currentCraft.recipeData
     local stationData = currentCraft.stationData
+    local ingredientsConsumed = currentCraft.ingredientsConsumed
 
     -- Save station data before clearing for the completion event
     local completionData = {
@@ -392,22 +403,18 @@ failCrafting = function()
         status = 'cancelled',
     }
 
-    -- Determine if ingredients are lost on failure
-    local loseIngredients = Config.Cooking.Quality.failurePenalty ~= false
-
-    if loseIngredients then
-        -- Notify server to remove some ingredients
+    -- Return ingredients if they were consumed
+    if ingredientsConsumed then
         lib.callback.await(
-            'free-restaurants:server:craftFailed',
+            'free-restaurants:server:returnIngredients',
             false,
-            currentCraft.recipeId,
-            stationData.locationKey
+            recipeId
         )
 
         lib.notify({
-            title = 'Crafting Failed',
-            description = 'You ruined the ' .. recipeData.label .. ' and lost some ingredients!',
-            type = 'error',
+            title = 'Crafting Cancelled',
+            description = 'Ingredients have been returned.',
+            type = 'inform',
         })
     else
         lib.notify({
@@ -456,25 +463,32 @@ local function quickCraft(recipeId, recipeData, stationData)
         })
         return
     end
-    
-    -- Check ingredients
-    local hasAll, missing = hasIngredients(recipeData.ingredients)
-    if not hasAll then
+
+    -- Consume ingredients FIRST (before progress starts)
+    local consumeSuccess, avgFreshness = lib.callback.await(
+        'free-restaurants:server:consumeIngredients',
+        false,
+        recipeId
+    )
+
+    if not consumeSuccess then
         lib.notify({
-            title = 'Missing Ingredients',
-            description = formatMissingIngredients(missing),
+            title = 'Cannot Craft',
+            description = avgFreshness or 'Missing ingredients',
             type = 'error',
         })
         return
     end
-    
+
     isCrafting = true
     currentCraft = {
         recipeId = recipeId,
         recipeData = recipeData,
         stationData = stationData,
+        avgFreshness = avgFreshness,
+        ingredientsConsumed = true,
     }
-    
+
     -- Simple progress bar
     local success = lib.progressCircle({
         duration = recipeData.craftTime or 3000,
@@ -486,7 +500,7 @@ local function quickCraft(recipeId, recipeData, stationData)
             combat = true,
         },
     })
-    
+
     if success then
         completeCrafting(1.0) -- Full quality for quick crafts
     else
@@ -503,14 +517,16 @@ end
 ---@param recipeData table Recipe configuration
 ---@param stationData table Active station data
 local function openBatchCraft(recipeId, recipeData, stationData)
-    -- Calculate max craftable based on ingredients
+    -- Calculate max craftable based on ingredients (using array format)
     local maxCraftable = 999
-    for item, amount in pairs(recipeData.ingredients) do
+    for _, ingredient in ipairs(recipeData.ingredients) do
+        local item = ingredient.item
+        local amount = ingredient.count or 1
         local count = exports.ox_inventory:Search('count', item)
         local possible = math.floor(count / amount)
         maxCraftable = math.min(maxCraftable, possible)
     end
-    
+
     if maxCraftable <= 0 then
         lib.notify({
             title = 'Missing Ingredients',
@@ -519,7 +535,7 @@ local function openBatchCraft(recipeId, recipeData, stationData)
         })
         return
     end
-    
+
     local input = lib.inputDialog('Batch Craft ' .. recipeData.label, {
         {
             type = 'number',
@@ -530,12 +546,12 @@ local function openBatchCraft(recipeId, recipeData, stationData)
             max = maxCraftable,
         },
     })
-    
+
     if not input then return end
-    
+
     local amount = input[1]
     if amount < 1 or amount > maxCraftable then return end
-    
+
     -- Start batch crafting
     batchCraft(recipeId, recipeData, stationData, amount)
 end
@@ -547,18 +563,36 @@ end
 ---@param amount number
 local function batchCraft(recipeId, recipeData, stationData, amount)
     if isCrafting then return end
-    
+
+    -- Consume ingredients FIRST (before progress starts)
+    local consumeSuccess, avgFreshness = lib.callback.await(
+        'free-restaurants:server:consumeBatchIngredients',
+        false,
+        recipeId,
+        amount
+    )
+
+    if not consumeSuccess then
+        lib.notify({
+            title = 'Cannot Craft',
+            description = avgFreshness or 'Missing ingredients',
+            type = 'error',
+        })
+        return
+    end
+
     isCrafting = true
     currentCraft = {
         recipeId = recipeId,
         recipeData = recipeData,
         stationData = stationData,
         batchAmount = amount,
+        avgFreshness = avgFreshness,
+        ingredientsConsumed = true,
     }
-    
+
     local totalTime = (recipeData.craftTime or 5000) * amount
-    local crafted = 0
-    
+
     -- Progress with updates
     local success = lib.progressCircle({
         duration = totalTime,
@@ -570,17 +604,26 @@ local function batchCraft(recipeId, recipeData, stationData, amount)
             combat = true,
         },
     })
-    
+
+    -- Save station data before clearing for the completion event
+    local completionData = {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.slotIndex,
+        status = success and 'completed' or 'cancelled',
+    }
+
     if success then
-        -- Complete batch on server
+        -- Complete batch on server (give items)
         local serverSuccess, message = lib.callback.await(
             'free-restaurants:server:completeBatchCraft',
             false,
             recipeId,
             amount,
-            stationData.locationKey
+            stationData.locationKey,
+            avgFreshness
         )
-        
+
         if serverSuccess then
             lib.notify({
                 title = 'Batch Complete',
@@ -595,20 +638,20 @@ local function batchCraft(recipeId, recipeData, stationData, amount)
             })
         end
     else
+        -- Cancelled - return ingredients
+        lib.callback.await(
+            'free-restaurants:server:returnBatchIngredients',
+            false,
+            recipeId,
+            amount
+        )
+
         lib.notify({
             title = 'Cancelled',
-            description = 'Batch crafting cancelled.',
+            description = 'Batch crafting cancelled. Ingredients returned.',
             type = 'inform',
         })
     end
-
-    -- Save station data before clearing for the completion event
-    local completionData = {
-        locationKey = stationData.locationKey,
-        stationKey = stationData.stationKey,
-        slotIndex = stationData.slotIndex,
-        status = success and 'completed' or 'cancelled',
-    }
 
     isCrafting = false
     currentCraft = nil
