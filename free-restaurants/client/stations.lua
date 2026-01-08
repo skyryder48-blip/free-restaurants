@@ -37,6 +37,15 @@ local hudVisible = false            -- HUD visibility state
 -- Prop model cache to avoid repeated streaming requests
 local modelCache = {}
 
+-- Pending pickup items at stations (tracked client-side for timers)
+-- Key format: "locationKey_stationKey_slotIndex"
+local pendingPickups = {}
+
+-- Forward declaration for pickup functions
+local startPickupTimer
+local handleItemBurnOrSpill
+local pickupItemFromStation
+
 -- Forward declarations for functions used before definition
 local hideStationHUD
 local updateStationHUD
@@ -1032,6 +1041,7 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
     
     -- Add slot options
     for slotIndex = 1, numSlots do
+        -- Option to use the slot (start crafting)
         table.insert(targetOptions, {
             name = ('%s_slot_%d'):format(fullStationKey, slotIndex),
             label = numSlots > 1
@@ -1072,6 +1082,29 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
             end,
             onSelect = function()
                 onStationSlotSelected(locationKey, stationKey, slotIndex, stationData, stationTypeConfig)
+            end,
+        })
+
+        -- Option to pick up completed item from slot
+        table.insert(targetOptions, {
+            name = ('%s_slot_%d_pickup'):format(fullStationKey, slotIndex),
+            label = numSlots > 1
+                and ('Pick Up Item (Slot %d)'):format(slotIndex)
+                or 'Pick Up Item',
+            icon = 'fa-solid fa-hand',
+            canInteract = function()
+                -- Check if on duty
+                if not FreeRestaurants.Client.IsOnDuty() then
+                    return false
+                end
+
+                -- Check if there's a pending pickup at this slot
+                local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
+                return pendingPickups[pendingKey] ~= nil
+            end,
+            onSelect = function()
+                local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
+                pickupItemFromStation(pendingKey)
             end,
         })
     end
@@ -1328,16 +1361,196 @@ end
 
 --- Called when cooking state updates (from cooking.lua)
 ---@param data table Cooking state data
+-- ============================================================================
+-- PICKUP SYSTEM (Burn/Spill Mechanics)
+-- ============================================================================
+
+--- Pick up an item from the station
+---@param pendingKey string The pending pickup key
+pickupItemFromStation = function(pendingKey)
+    local pending = pendingPickups[pendingKey]
+    if not pending then
+        return false, 'No item to pick up'
+    end
+
+    -- Call server to pick up the item
+    local success, result = lib.callback.await(
+        'free-restaurants:server:pickupFromStation',
+        false,
+        pending.locationKey,
+        pending.stationKey,
+        pending.slotIndex
+    )
+
+    if success then
+        lib.notify({
+            title = 'Item Picked Up',
+            description = ('Collected %s'):format(result.recipeLabel or 'item'),
+            type = 'success',
+        })
+
+        -- Clean up the pending pickup
+        pendingPickups[pendingKey] = nil
+
+        -- Release the slot now
+        local fullStationKey = ('%s_%s'):format(pending.locationKey, pending.stationKey)
+        releaseSlot(pending.locationKey, pending.stationKey, pending.slotIndex, 'collected')
+        cleanupSlot(fullStationKey, pending.slotIndex)
+
+        return true
+    else
+        lib.notify({
+            title = 'Pickup Failed',
+            description = result or 'Could not pick up item',
+            type = 'error',
+        })
+        return false
+    end
+end
+
+--- Handle item burn or spill when timer expires
+---@param pendingKey string The pending pickup key
+handleItemBurnOrSpill = function(pendingKey)
+    local pending = pendingPickups[pendingKey]
+    if not pending then return end
+
+    local pickupConfig = pending.pickupConfig
+    local isBurn = pickupConfig.canBurn
+    local fullStationKey = ('%s_%s'):format(pending.locationKey, pending.stationKey)
+
+    -- Call server to handle burn/spill
+    lib.callback.await(
+        'free-restaurants:server:handleBurnOrSpill',
+        false,
+        pending.locationKey,
+        pending.stationKey,
+        pending.slotIndex,
+        isBurn
+    )
+
+    -- Show notification
+    if isBurn then
+        lib.notify({
+            title = 'Food Burned!',
+            description = ('%s was left too long and burned!'):format(pending.recipeLabel or 'Item'),
+            type = 'error',
+        })
+
+        -- Trigger burnt state for particles/fire
+        TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+            locationKey = pending.locationKey,
+            stationKey = pending.stationKey,
+            slotIndex = pending.slotIndex,
+            stationType = pending.stationType,
+            slotCoords = pending.slotCoords,
+            status = 'burnt',
+            progress = 100,
+            quality = 0,
+        })
+    else
+        lib.notify({
+            title = 'Drink Spilled!',
+            description = ('%s was left too long and spilled!'):format(pending.recipeLabel or 'Item'),
+            type = 'error',
+        })
+
+        -- Clean up the slot (spilled items don't cause fire)
+        cleanupSlot(fullStationKey, pending.slotIndex)
+    end
+
+    -- Release the slot
+    releaseSlot(pending.locationKey, pending.stationKey, pending.slotIndex, isBurn and 'burnt' or 'spilled')
+
+    -- Remove from pending pickups
+    pendingPickups[pendingKey] = nil
+end
+
+--- Start the pickup timer for an item
+---@param pendingKey string The pending pickup key
+---@param pickupConfig table The pickup configuration
+startPickupTimer = function(pendingKey, pickupConfig)
+    local timeout = pickupConfig.timeout * 1000  -- Convert to ms
+    local warningTime = pickupConfig.warningTime * 1000
+
+    -- Warning timer (if configured)
+    if warningTime > 0 and warningTime < timeout then
+        SetTimeout(timeout - warningTime, function()
+            local pending = pendingPickups[pendingKey]
+            if not pending then return end  -- Already picked up
+
+            -- Show warning
+            if pickupConfig.canBurn then
+                lib.notify({
+                    title = 'Warning!',
+                    description = ('%s is about to burn! Pick it up now!'):format(pending.recipeLabel or 'Food'),
+                    type = 'warning',
+                })
+            elseif pickupConfig.canSpill then
+                lib.notify({
+                    title = 'Warning!',
+                    description = ('%s is about to spill! Pick it up now!'):format(pending.recipeLabel or 'Drink'),
+                    type = 'warning',
+                })
+            end
+
+            -- Update state to warning
+            TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+                locationKey = pending.locationKey,
+                stationKey = pending.stationKey,
+                slotIndex = pending.slotIndex,
+                stationType = pending.stationType,
+                slotCoords = pending.slotCoords,
+                status = 'warning',
+                progress = 100,
+                quality = pending.quality,
+            })
+        end)
+    end
+
+    -- Burn/Spill timer
+    SetTimeout(timeout, function()
+        local pending = pendingPickups[pendingKey]
+        if not pending then return end  -- Already picked up
+
+        -- Item burned or spilled
+        handleItemBurnOrSpill(pendingKey)
+    end)
+end
+
+--- Check if there's a pending pickup at coordinates
+---@param coords vector3
+---@param maxDistance number
+---@return string|nil pendingKey
+---@return table|nil pendingData
+local function findNearbyPendingPickup(coords, maxDistance)
+    maxDistance = maxDistance or 2.0
+
+    for pendingKey, pending in pairs(pendingPickups) do
+        if pending.slotCoords then
+            local distance = #(coords - pending.slotCoords)
+            if distance <= maxDistance then
+                return pendingKey, pending
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+-- ============================================================================
+-- COOKING STATE HANDLERS
+-- ============================================================================
+
 local function onCookingStateUpdate(data)
     local fullStationKey = ('%s_%s'):format(data.locationKey, data.stationKey)
     local slotIndex = data.slotIndex
-    
+
     -- Update slot state
     local slotState = getSlotState(data.locationKey, data.stationKey, slotIndex)
     slotState.status = data.status
     slotState.progress = data.progress
     slotState.quality = data.quality
-    
+
     -- Update particles based on status
     local stationTypeConfig = Config.Stations.Types[data.stationType]
     updateCookingParticles(fullStationKey, slotIndex, data.status, data.stationType, data.slotCoords)
@@ -1365,15 +1578,56 @@ end
 local function onCookingComplete(data)
     local fullStationKey = ('%s_%s'):format(data.locationKey, data.stationKey)
     local slotIndex = data.slotIndex
-    
-    -- Release slot
+
+    -- Handle 'ready_for_pickup' status - item stays at station
+    if data.status == 'ready_for_pickup' then
+        -- Don't release slot yet - item is waiting for pickup
+        -- Start pickup timer if this station has timeout
+        local pickupConfig = data.pickupConfig
+        if pickupConfig and pickupConfig.required then
+            -- Track pending pickup
+            local pendingKey = ('%s_%s_%d'):format(data.locationKey, data.stationKey, slotIndex)
+            pendingPickups[pendingKey] = {
+                locationKey = data.locationKey,
+                stationKey = data.stationKey,
+                slotIndex = slotIndex,
+                slotCoords = data.slotCoords,
+                stationType = data.stationType,
+                recipeId = data.recipeId,
+                recipeLabel = data.recipeLabel,
+                quality = data.quality,
+                pickupConfig = pickupConfig,
+                createdAt = GetGameTimer(),
+            }
+
+            -- Start timer if there's a timeout
+            if pickupConfig.timeout and pickupConfig.timeout > 0 then
+                startPickupTimer(pendingKey, pickupConfig)
+            end
+        end
+
+        -- Keep the slot marked as in-use until pickup
+        -- Update slot state to 'ready'
+        if stationSlots[fullStationKey] and stationSlots[fullStationKey][slotIndex] then
+            stationSlots[fullStationKey][slotIndex].status = 'ready'
+            stationSlots[fullStationKey][slotIndex].recipeLabel = data.recipeLabel
+        end
+
+        -- Hide HUD if this was our station
+        if currentStation == fullStationKey then
+            hideStationHUD()
+        end
+        return
+    end
+
+    -- For other statuses (completed, failed, cancelled, burnt), release slot normally
     releaseSlot(data.locationKey, data.stationKey, slotIndex, data.status)
-    
+
     -- Clean up if not burnt (burnt items keep fire going)
     if data.status ~= 'burnt' then
         cleanupSlot(fullStationKey, slotIndex)
     end
-    
+
     -- Hide HUD if this was our station
     if currentStation == fullStationKey then
         hideStationHUD()
@@ -1597,6 +1851,17 @@ exports('UpdateStationHUD', updateStationHUD)
 -- Slot management
 exports('ClaimSlot', claimSlot)
 exports('ReleaseSlot', releaseSlot)
+
+-- Pickup system
+exports('GetPendingPickups', function() return pendingPickups end)
+exports('GetPendingPickup', function(locationKey, stationKey, slotIndex)
+    local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
+    return pendingPickups[pendingKey]
+end)
+exports('PickupItemFromStation', function(locationKey, stationKey, slotIndex)
+    local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
+    return pickupItemFromStation(pendingKey)
+end)
 
 -- ============================================================================
 -- SERVER SYNC EVENT HANDLERS

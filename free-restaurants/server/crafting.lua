@@ -18,6 +18,14 @@
 local calculateLevel
 
 -- ============================================================================
+-- PENDING STATION ITEMS
+-- ============================================================================
+
+-- Track items waiting for pickup at stations
+-- Key format: "locationKey:stationKey:slotIndex"
+local pendingStationItems = {}
+
+-- ============================================================================
 -- QUALITY SYSTEM
 -- ============================================================================
 
@@ -575,6 +583,228 @@ lib.callback.register('free-restaurants:server:unlockRecipe', function(source, r
 end)
 
 -- ============================================================================
+-- STATION PICKUP SYSTEM
+-- ============================================================================
+
+--- Generate a unique key for pending station items
+---@param locationKey string
+---@param stationKey string
+---@param slotIndex number
+---@return string
+local function getPendingItemKey(locationKey, stationKey, slotIndex)
+    return ('%s:%s:%d'):format(locationKey, stationKey, slotIndex)
+end
+
+--- Store a crafted item at the station for pickup (instead of giving directly)
+lib.callback.register('free-restaurants:server:storeAtStation', function(source, recipeId, quality, locationKey, stationKey, slotIndex, avgFreshness)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false, 'Player not found' end
+
+    -- Get recipe
+    local recipe = Config.Recipes.Items[recipeId]
+    if not recipe then return false, 'Invalid recipe' end
+
+    -- Calculate final quality with freshness
+    local finalQuality = calculateItemQuality(quality, avgFreshness or 100)
+
+    -- Get result item info
+    local result = recipe.result
+    if not result then return false, 'Recipe has no result' end
+
+    local itemName = type(result) == 'table' and result.item or result
+    local amount = type(result) == 'table' and result.amount or 1
+
+    -- Build metadata
+    local metadata = {
+        quality = finalQuality,
+        craftedAt = os.time(),
+        craftedBy = player.PlayerData.citizenid,
+    }
+
+    -- Add freshness for food items
+    if recipe.category == 'food' or recipe.isFoodItem then
+        metadata.freshness = finalQuality
+        metadata.decayRate = recipe.decayRate or 1.0
+    end
+
+    -- Add any custom metadata from recipe
+    if recipe.metadata then
+        for k, v in pairs(recipe.metadata) do
+            metadata[k] = v
+        end
+    end
+
+    -- Apply quality tier label
+    local qualityLabel, qualityTier = getQualityInfo(finalQuality)
+    metadata.qualityLabel = qualityLabel
+    metadata.qualityTier = qualityTier
+
+    -- Store pending item at station (not in player inventory yet)
+    local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+    pendingStationItems[pendingKey] = {
+        recipeId = recipeId,
+        itemName = itemName,
+        amount = amount,
+        metadata = metadata,
+        quality = finalQuality,
+        craftedBy = source,
+        craftedAt = os.time(),
+        locationKey = locationKey,
+        stationKey = stationKey,
+        slotIndex = slotIndex,
+        recipe = recipe,
+    }
+
+    -- Award XP immediately (crafting is done, just needs pickup)
+    awardCraftXP(source, recipe, finalQuality)
+
+    -- Add to business earnings if configured
+    local session = exports['free-restaurants']:GetSession(source)
+    if session and recipe.businessValue then
+        exports['free-restaurants']:UpdateBusinessBalance(
+            session.job,
+            recipe.businessValue,
+            'production',
+            ('Crafted %s'):format(recipe.label),
+            player.PlayerData.citizenid
+        )
+    end
+
+    -- Track task completion
+    exports['free-restaurants']:IncrementTasks(source)
+
+    print(('[free-restaurants] Player %s crafted %s - stored at station %s slot %d (quality: %d)'):format(
+        player.PlayerData.citizenid, recipeId, stationKey, slotIndex, finalQuality
+    ))
+
+    return true, nil
+end)
+
+--- Pick up a crafted item from the station
+lib.callback.register('free-restaurants:server:pickupFromStation', function(source, locationKey, stationKey, slotIndex)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false, 'Player not found' end
+
+    local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+    local pendingItem = pendingStationItems[pendingKey]
+
+    if not pendingItem then
+        return false, 'No item at this station'
+    end
+
+    -- Add item to player inventory
+    local success = exports.ox_inventory:AddItem(source, pendingItem.itemName, pendingItem.amount, pendingItem.metadata)
+
+    if not success then
+        return false, 'Inventory full'
+    end
+
+    -- Clear pending item
+    pendingStationItems[pendingKey] = nil
+
+    print(('[free-restaurants] Player %s picked up %s from station %s slot %d'):format(
+        player.PlayerData.citizenid, pendingItem.itemName, stationKey, slotIndex
+    ))
+
+    return true, {
+        itemName = pendingItem.itemName,
+        amount = pendingItem.amount,
+        quality = pendingItem.quality,
+        recipeLabel = pendingItem.recipe.label,
+    }
+end)
+
+--- Handle burn or spill event for item at station
+lib.callback.register('free-restaurants:server:handleBurnOrSpill', function(source, locationKey, stationKey, slotIndex, isBurn)
+    local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+    local pendingItem = pendingStationItems[pendingKey]
+
+    if not pendingItem then
+        return false, 'No item at this station'
+    end
+
+    local stationType = nil
+    -- Try to get station type from config
+    local locationConfig = Config.Locations and Config.Locations[locationKey]
+    if locationConfig and locationConfig.stations and locationConfig.stations[stationKey] then
+        stationType = locationConfig.stations[stationKey].type
+    end
+
+    local stationTypeConfig = stationType and Config.Stations.Types[stationType]
+    local pickupConfig = stationTypeConfig and stationTypeConfig.pickup
+
+    local resultItem = nil
+    local resultAmount = 0
+
+    if isBurn then
+        -- Item burned - give burnt item if configured
+        if pickupConfig and pickupConfig.burntItem then
+            resultItem = pickupConfig.burntItem
+            resultAmount = 1
+        end
+        print(('[free-restaurants] Item %s burned at station %s slot %d'):format(
+            pendingItem.itemName, stationKey, slotIndex
+        ))
+    else
+        -- Item spilled - give spilled item if configured
+        if pickupConfig and pickupConfig.spilledItem then
+            resultItem = pickupConfig.spilledItem
+            resultAmount = 1
+        end
+        print(('[free-restaurants] Item %s spilled at station %s slot %d'):format(
+            pendingItem.itemName, stationKey, slotIndex
+        ))
+    end
+
+    -- Give replacement item if one is configured
+    if resultItem and resultAmount > 0 and source then
+        local player = exports.qbx_core:GetPlayer(source)
+        if player then
+            exports.ox_inventory:AddItem(source, resultItem, resultAmount)
+        end
+    end
+
+    -- Clear pending item (it's destroyed/burnt/spilled)
+    pendingStationItems[pendingKey] = nil
+
+    return true, {
+        wasBurn = isBurn,
+        replacementItem = resultItem,
+    }
+end)
+
+--- Check if there's a pending item at a station slot
+lib.callback.register('free-restaurants:server:getPendingItem', function(source, locationKey, stationKey, slotIndex)
+    local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+    local pendingItem = pendingStationItems[pendingKey]
+
+    if not pendingItem then
+        return nil
+    end
+
+    return {
+        recipeId = pendingItem.recipeId,
+        itemName = pendingItem.itemName,
+        amount = pendingItem.amount,
+        quality = pendingItem.quality,
+        craftedAt = pendingItem.craftedAt,
+        recipeLabel = pendingItem.recipe.label,
+    }
+end)
+
+--- Clear a pending item (for admin/cleanup purposes)
+lib.callback.register('free-restaurants:server:clearPendingItem', function(source, locationKey, stationKey, slotIndex)
+    local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+
+    if pendingStationItems[pendingKey] then
+        pendingStationItems[pendingKey] = nil
+        return true
+    end
+
+    return false
+end)
+
+-- ============================================================================
 -- EXPORTS
 -- ============================================================================
 
@@ -583,5 +813,13 @@ exports('RemoveIngredients', removeIngredients)
 exports('CreateCraftedItem', createCraftedItem)
 exports('AwardCraftXP', awardCraftXP)
 exports('CalculateLevel', calculateLevel)
+exports('GetPendingStationItem', function(locationKey, stationKey, slotIndex)
+    local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+    return pendingStationItems[pendingKey]
+end)
+exports('ClearPendingStationItem', function(locationKey, stationKey, slotIndex)
+    local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+    pendingStationItems[pendingKey] = nil
+end)
 
 print('[free-restaurants] server/crafting.lua loaded')
