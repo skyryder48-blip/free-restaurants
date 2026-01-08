@@ -319,11 +319,11 @@ end
 ---@param quality number Quality multiplier
 completeCrafting = function(quality)
     if not currentCraft then return end
-    
+
     local recipeId = currentCraft.recipeId
     local recipeData = currentCraft.recipeData
     local stationData = currentCraft.stationData
-    
+
     -- Send to server for item creation
     local success, message = lib.callback.await(
         'free-restaurants:server:completeCraft',
@@ -332,22 +332,30 @@ completeCrafting = function(quality)
         quality,
         stationData.locationKey
     )
-    
+
+    -- Save station data before clearing for the completion event
+    local completionData = {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.slotIndex,
+        status = success and 'completed' or 'failed',
+    }
+
     -- Clear crafting state
     isCrafting = false
     currentCraft = nil
     clearCraftingProps()
-    
+
     if success then
         -- Success notification
         local qualityLabel, qualityColor = FreeRestaurants.Utils.GetQualityLabel(quality * 100)
-        
+
         lib.notify({
             title = 'Crafting Complete',
             description = ('Created %s (%s quality)'):format(recipeData.label, qualityLabel),
             type = 'success',
         })
-        
+
         -- XP notification if applicable
         if recipeData.xpReward then
             lib.notify({
@@ -364,29 +372,38 @@ completeCrafting = function(quality)
             type = 'error',
         })
     end
-    
-    -- Trigger completion event
-    TriggerEvent('free-restaurants:client:craftingComplete')
+
+    -- Trigger completion event with station data for slot release
+    TriggerEvent('free-restaurants:client:cookingComplete', completionData)
 end
 
 --- Handle failed crafting
 failCrafting = function()
     if not currentCraft then return end
-    
+
     local recipeData = currentCraft.recipeData
-    
+    local stationData = currentCraft.stationData
+
+    -- Save station data before clearing for the completion event
+    local completionData = {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.slotIndex,
+        status = 'cancelled',
+    }
+
     -- Determine if ingredients are lost on failure
     local loseIngredients = Config.Cooking.Quality.failurePenalty ~= false
-    
+
     if loseIngredients then
         -- Notify server to remove some ingredients
         lib.callback.await(
             'free-restaurants:server:craftFailed',
             false,
             currentCraft.recipeId,
-            currentCraft.stationData.locationKey
+            stationData.locationKey
         )
-        
+
         lib.notify({
             title = 'Crafting Failed',
             description = 'You ruined the ' .. recipeData.label .. ' and lost some ingredients!',
@@ -399,17 +416,17 @@ failCrafting = function()
             type = 'inform',
         })
     end
-    
+
     -- Clear state
     isCrafting = false
     currentCraft = nil
     clearCraftingProps()
-    
+
     -- Clear animation
     ClearPedTasks(cache.ped)
-    
-    -- Trigger completion event (to reopen menu)
-    TriggerEvent('free-restaurants:client:craftingComplete')
+
+    -- Trigger completion event with station data for slot release
+    TriggerEvent('free-restaurants:client:cookingComplete', completionData)
 end
 
 --- Clear crafting props
@@ -584,11 +601,20 @@ local function batchCraft(recipeId, recipeData, stationData, amount)
             type = 'inform',
         })
     end
-    
+
+    -- Save station data before clearing for the completion event
+    local completionData = {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.slotIndex,
+        status = success and 'completed' or 'cancelled',
+    }
+
     isCrafting = false
     currentCraft = nil
-    
-    TriggerEvent('free-restaurants:client:craftingComplete')
+
+    -- Trigger completion event with station data for slot release
+    TriggerEvent('free-restaurants:client:cookingComplete', completionData)
 end
 
 -- ============================================================================
