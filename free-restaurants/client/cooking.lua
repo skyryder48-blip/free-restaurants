@@ -403,13 +403,20 @@ completeCrafting = function(quality)
     local stationData = currentCraft.stationData
     local avgFreshness = currentCraft.avgFreshness
 
-    -- Send to server for item creation (ingredients already consumed)
+    -- Get station type config for pickup settings
+    local stationType = stationData.stationData and stationData.stationData.type or 'prep_counter'
+    local stationTypeConfig = Config.Stations.Types[stationType]
+    local pickupConfig = stationTypeConfig and stationTypeConfig.pickup
+
+    -- Store item at station for pickup (instead of giving directly to player)
     local success, message = lib.callback.await(
-        'free-restaurants:server:completeCraft',
+        'free-restaurants:server:storeAtStation',
         false,
         recipeId,
         quality,
         stationData.locationKey,
+        stationData.stationKey,
+        stationData.slotIndex,
         avgFreshness
     )
 
@@ -418,7 +425,13 @@ completeCrafting = function(quality)
         locationKey = stationData.locationKey,
         stationKey = stationData.stationKey,
         slotIndex = stationData.slotIndex,
-        status = success and 'completed' or 'failed',
+        slotCoords = stationData.slotCoords,
+        stationType = stationType,
+        status = success and 'ready_for_pickup' or 'failed',
+        recipeId = recipeId,
+        recipeLabel = recipeData.label,
+        quality = quality,
+        pickupConfig = pickupConfig,
     }
 
     -- Clear crafting state
@@ -427,14 +440,31 @@ completeCrafting = function(quality)
     clearCraftingProps()
 
     if success then
-        -- Success notification
+        -- Success notification - item is ready for pickup
         local qualityLabel, qualityColor = FreeRestaurants.Utils.GetQualityLabel(quality * 100)
 
         lib.notify({
-            title = 'Crafting Complete',
-            description = ('Created %s (%s quality)'):format(recipeData.label, qualityLabel),
+            title = 'Ready for Pickup',
+            description = ('%s is ready! Pick it up from the station.'):format(recipeData.label),
             type = 'success',
         })
+
+        -- Show warning about burn/spill if applicable
+        if pickupConfig and pickupConfig.timeout and pickupConfig.timeout > 0 then
+            if pickupConfig.canBurn then
+                lib.notify({
+                    title = 'Warning',
+                    description = ('Pick up within %d seconds or it will burn!'):format(pickupConfig.timeout),
+                    type = 'warning',
+                })
+            elseif pickupConfig.canSpill then
+                lib.notify({
+                    title = 'Warning',
+                    description = ('Pick up within %d seconds or it will spill!'):format(pickupConfig.timeout),
+                    type = 'warning',
+                })
+            end
+        end
 
         -- XP notification if applicable
         if recipeData.xpReward then
@@ -453,7 +483,7 @@ completeCrafting = function(quality)
         })
     end
 
-    -- Trigger completion event with station data for slot release
+    -- Trigger completion event with station data (item stays at station until pickup)
     TriggerEvent('free-restaurants:client:cookingComplete', completionData)
 end
 

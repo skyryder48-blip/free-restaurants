@@ -9,6 +9,7 @@
         - requirements: Grade/permission requirements
         - particles: Cooking visual effects
         - sounds: Audio effects during cooking
+        - pickup: Item pickup timing and burn/spill behavior
 ]]
 
 Config = Config or {}
@@ -40,6 +41,15 @@ Config.Stations.Types = {
             cooking = { name = 'sizzle', volume = 0.3 },
         },
         slotSpacing = 0.4,
+        -- Pickup configuration: items left on hot surfaces will burn
+        pickup = {
+            required = true,           -- Must pick up item from station
+            timeout = 30,              -- Seconds before item burns (0 = no timeout)
+            warningTime = 10,          -- Seconds before timeout to show warning
+            canBurn = true,            -- Food can burn if left too long
+            canSpill = false,          -- Drinks can spill
+            burntItem = 'burnt_food',  -- Item given when burned (nil = item destroyed)
+        },
     },
 
     -- Deep Fryer
@@ -60,6 +70,14 @@ Config.Stations.Types = {
             burning = { dict = 'core', name = 'ent_ray_prologue_fire_smoke', scale = 0.5 },
         },
         slotSpacing = 0.3,
+        pickup = {
+            required = true,
+            timeout = 20,              -- Frying is faster to burn
+            warningTime = 8,
+            canBurn = true,
+            canSpill = false,
+            burntItem = 'burnt_food',
+        },
     },
 
     -- Oven
@@ -79,6 +97,14 @@ Config.Stations.Types = {
             ready = { dict = 'core', name = 'ent_amb_smoke_foundry', scale = 0.2 },
         },
         slotSpacing = 0.5,
+        pickup = {
+            required = true,
+            timeout = 45,              -- Oven stays warm longer
+            warningTime = 15,
+            canBurn = true,
+            canSpill = false,
+            burntItem = 'burnt_food',
+        },
     },
 
     -- Stovetop
@@ -97,9 +123,17 @@ Config.Stations.Types = {
             cooking = { dict = 'core', name = 'ent_amb_smoke_foundry', scale = 0.3 },
         },
         slotSpacing = 0.35,
+        pickup = {
+            required = true,
+            timeout = 25,
+            warningTime = 10,
+            canBurn = true,
+            canSpill = false,
+            burntItem = 'burnt_food',
+        },
     },
 
-    -- Prep Counter (for assembly, no cooking)
+    -- Prep Counter (for assembly, no cooking) - NO BURN/SPILL
     ['prep_counter'] = {
         label = 'Prep Counter',
         icon = 'fa-solid fa-utensils',
@@ -113,9 +147,16 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.5,
+        pickup = {
+            required = true,
+            timeout = 0,               -- No timeout - items can stay indefinitely
+            warningTime = 0,
+            canBurn = false,
+            canSpill = false,
+        },
     },
 
-    -- Cutting Board
+    -- Cutting Board - NO BURN/SPILL
     ['cutting_board'] = {
         label = 'Cutting Board',
         icon = 'fa-solid fa-knife',
@@ -129,9 +170,16 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.3,
+        pickup = {
+            required = true,
+            timeout = 0,
+            warningTime = 0,
+            canBurn = false,
+            canSpill = false,
+        },
     },
 
-    -- Mixer
+    -- Mixer - NO BURN/SPILL
     ['mixer'] = {
         label = 'Mixer',
         icon = 'fa-solid fa-blender',
@@ -145,9 +193,16 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.3,
+        pickup = {
+            required = true,
+            timeout = 0,
+            warningTime = 0,
+            canBurn = false,
+            canSpill = false,
+        },
     },
 
-    -- Coffee Machine
+    -- Coffee Machine - can spill if left
     ['coffee_machine'] = {
         label = 'Coffee Machine',
         icon = 'fa-solid fa-mug-hot',
@@ -163,9 +218,17 @@ Config.Stations.Types = {
             cooking = { dict = 'core', name = 'ent_amb_smoke_foundry', scale = 0.2 },
         },
         slotSpacing = 0.25,
+        pickup = {
+            required = true,
+            timeout = 60,              -- Coffee can sit a while
+            warningTime = 15,
+            canBurn = false,
+            canSpill = true,           -- Overflow if left too long
+            spilledItem = nil,         -- Destroyed when spilled
+        },
     },
 
-    -- Drink Mixer / Bar
+    -- Drink Mixer / Bar - can spill
     ['drink_mixer'] = {
         label = 'Drink Mixer',
         icon = 'fa-solid fa-martini-glass',
@@ -179,6 +242,14 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.3,
+        pickup = {
+            required = true,
+            timeout = 45,
+            warningTime = 15,
+            canBurn = false,
+            canSpill = true,
+            spilledItem = nil,
+        },
     },
 
     -- Pizza Oven
@@ -199,9 +270,17 @@ Config.Stations.Types = {
             burning = { dict = 'core', name = 'ent_ray_prologue_fire_smoke', scale = 0.7 },
         },
         slotSpacing = 0.6,
+        pickup = {
+            required = true,
+            timeout = 35,
+            warningTime = 12,
+            canBurn = true,
+            canSpill = false,
+            burntItem = 'burnt_food',
+        },
     },
 
-    -- Ice Cream Machine
+    -- Ice Cream Machine - can melt (spill effect)
     ['ice_cream_machine'] = {
         label = 'Ice Cream Machine',
         icon = 'fa-solid fa-ice-cream',
@@ -215,9 +294,17 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.3,
+        pickup = {
+            required = true,
+            timeout = 90,              -- Ice cream melts slowly
+            warningTime = 30,
+            canBurn = false,
+            canSpill = true,           -- Melts
+            spilledItem = nil,
+        },
     },
 
-    -- Soda Fountain
+    -- Soda Fountain - can overflow
     ['soda_fountain'] = {
         label = 'Soda Fountain',
         icon = 'fa-solid fa-cup-straw',
@@ -231,9 +318,16 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.2,
+        pickup = {
+            required = true,
+            timeout = 0,               -- Soda fountain holds cup, no spill
+            warningTime = 0,
+            canBurn = false,
+            canSpill = false,
+        },
     },
 
-    -- Blender
+    -- Blender - NO BURN/SPILL
     ['blender'] = {
         label = 'Blender',
         icon = 'fa-solid fa-blender',
@@ -247,9 +341,16 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.3,
+        pickup = {
+            required = true,
+            timeout = 0,
+            warningTime = 0,
+            canBurn = false,
+            canSpill = false,
+        },
     },
 
-    -- Plating Station
+    -- Plating Station - NO BURN/SPILL
     ['plating_station'] = {
         label = 'Plating Station',
         icon = 'fa-solid fa-plate-wheat',
@@ -263,9 +364,16 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.4,
+        pickup = {
+            required = true,
+            timeout = 0,
+            warningTime = 0,
+            canBurn = false,
+            canSpill = false,
+        },
     },
 
-    -- Packaging Station (for takeout/delivery)
+    -- Packaging Station - NO BURN/SPILL
     ['packaging_station'] = {
         label = 'Packaging Station',
         icon = 'fa-solid fa-box',
@@ -279,9 +387,16 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.4,
+        pickup = {
+            required = true,
+            timeout = 0,
+            warningTime = 0,
+            canBurn = false,
+            canSpill = false,
+        },
     },
 
-    -- Taco Station (for taco restaurants)
+    -- Taco Station
     ['taco_station'] = {
         label = 'Taco Station',
         icon = 'fa-solid fa-taco',
@@ -297,9 +412,17 @@ Config.Stations.Types = {
             cooking = { dict = 'core', name = 'ent_amb_smoke_foundry', scale = 0.3 },
         },
         slotSpacing = 0.4,
+        pickup = {
+            required = true,
+            timeout = 30,
+            warningTime = 10,
+            canBurn = true,
+            canSpill = false,
+            burntItem = 'burnt_food',
+        },
     },
 
-    -- Microwave (for heating items)
+    -- Microwave
     ['microwave'] = {
         label = 'Microwave',
         icon = 'fa-solid fa-radiation',
@@ -313,6 +436,14 @@ Config.Stations.Types = {
         },
         particles = {},
         slotSpacing = 0.3,
+        pickup = {
+            required = true,
+            timeout = 120,             -- Microwave keeps food warm
+            warningTime = 30,
+            canBurn = true,
+            canSpill = false,
+            burntItem = 'burnt_food',
+        },
     },
 }
 
