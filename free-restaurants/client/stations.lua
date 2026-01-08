@@ -44,6 +44,8 @@ local getAvailableRecipes
 local canCraftRecipe
 local startCookingAtSlot
 local onStationSlotSelected
+local deleteFoodProp
+local stopParticleEffect
 
 -- ============================================================================
 -- FOOD PROP DEFINITIONS
@@ -493,7 +495,7 @@ end
 --- Delete a food prop
 ---@param stationKey string
 ---@param slotIndex number
-local function deleteFoodProp(stationKey, slotIndex)
+deleteFoodProp = function(stationKey, slotIndex)
     local propKey = getPropKey(stationKey, slotIndex)
     local propData = spawnedProps[propKey]
     
@@ -587,7 +589,7 @@ end
 ---@param stationKey string
 ---@param slotIndex number
 ---@param effectType string
-local function stopParticleEffect(stationKey, slotIndex, effectType)
+stopParticleEffect = function(stationKey, slotIndex, effectType)
     local particleKey = getParticleKey(stationKey, slotIndex, effectType)
     local particleData = activeParticles[particleKey]
     
