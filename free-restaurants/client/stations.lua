@@ -46,6 +46,7 @@ local startCookingAtSlot
 local onStationSlotSelected
 local deleteFoodProp
 local stopParticleEffect
+local cleanupSlot
 
 -- ============================================================================
 -- FOOD PROP DEFINITIONS
@@ -912,7 +913,7 @@ end
 --- Clean up all effects and props for a slot
 ---@param stationKey string
 ---@param slotIndex number
-local function cleanupSlot(stationKey, slotIndex)
+cleanupSlot = function(stationKey, slotIndex)
     -- Delete prop
     deleteFoodProp(stationKey, slotIndex)
     
