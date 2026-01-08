@@ -24,6 +24,12 @@ local isCrafting = false
 local currentCraft = nil
 local craftingProps = {}
 
+-- Forward declarations for functions used before definition
+local executeCraftingSteps
+local completeCrafting
+local failCrafting
+local clearCraftingProps
+
 -- ============================================================================
 -- SKILL CHECK SYSTEM
 -- ============================================================================
@@ -229,7 +235,7 @@ end
 ---@param stationData table Station data
 ---@return boolean success
 ---@return number quality Final quality multiplier
-local function executeCraftingSteps(recipeData, stationData)
+executeCraftingSteps = function(recipeData, stationData)
     local steps = recipeData.steps or { { action = 'craft', label = 'Crafting...' } }
     local totalQuality = 0
     local stepCount = #steps
@@ -311,7 +317,7 @@ end
 
 --- Complete crafting successfully
 ---@param quality number Quality multiplier
-local function completeCrafting(quality)
+completeCrafting = function(quality)
     if not currentCraft then return end
     
     local recipeId = currentCraft.recipeId
@@ -364,7 +370,7 @@ local function completeCrafting(quality)
 end
 
 --- Handle failed crafting
-local function failCrafting()
+failCrafting = function()
     if not currentCraft then return end
     
     local recipeData = currentCraft.recipeData
@@ -407,7 +413,7 @@ local function failCrafting()
 end
 
 --- Clear crafting props
-local function clearCraftingProps()
+clearCraftingProps = function()
     for _, prop in ipairs(craftingProps) do
         if DoesEntityExist(prop) then
             DeleteEntity(prop)
