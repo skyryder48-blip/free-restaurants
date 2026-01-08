@@ -160,7 +160,8 @@ end
 -- ============================================================================
 
 --- Check if player can access management menu
----@return boolean
+---@return boolean canAccess
+---@return string|nil reason Reason for denial if canAccess is false
 local function canAccessManagement()
     local isOnDuty = FreeRestaurants.Client.IsOnDuty()
     local job = FreeRestaurants.Client.GetPlayerState('job')
@@ -172,14 +173,14 @@ local function canAccessManagement()
 
     if not isOnDuty then
         print('[free-restaurants] Access denied: not on duty')
-        return false
+        return false, 'not_on_duty'
     end
 
     -- Direct permission check (bypasses hasPermission issue)
     local jobConfig = Config.Jobs[job]
     if not jobConfig then
         print('[free-restaurants] Access denied: job not in Config.Jobs')
-        return false
+        return false, 'invalid_job'
     end
 
     -- Find the grade data, with fallback to highest grade
@@ -199,13 +200,13 @@ local function canAccessManagement()
 
     if not gradeData or not gradeData.permissions then
         print('[free-restaurants] Access denied: no grade permissions found')
-        return false
+        return false, 'no_permissions'
     end
 
     -- Check for all=true (owner access)
     if gradeData.permissions.all == true then
         print('[free-restaurants] Access granted: owner has all permissions')
-        return true
+        return true, nil
     end
 
     local hasFinances = gradeData.permissions.canAccessFinances == true
@@ -216,7 +217,11 @@ local function canAccessManagement()
         tostring(hasFinances), tostring(hasHire), tostring(hasFire)
     ))
 
-    return hasFinances or hasHire or hasFire
+    if hasFinances or hasHire or hasFire then
+        return true, nil
+    end
+
+    return false, 'insufficient_rank'
 end
 
 -- ============================================================================
@@ -227,10 +232,17 @@ end
 ---@param locationKey string
 ---@param locationData table
 openManagementMenu = function(locationKey, locationData)
-    if not canAccessManagement() then
+    local canAccess, reason = canAccessManagement()
+    if not canAccess then
+        local messages = {
+            not_on_duty = 'You must be on duty to access management.',
+            invalid_job = 'You don\'t work at a restaurant.',
+            no_permissions = 'Your position has no management permissions.',
+            insufficient_rank = 'You need to be a Manager or Owner to access this.',
+        }
         lib.notify({
             title = 'Access Denied',
-            description = 'You don\'t have permission to access management.',
+            description = messages[reason] or 'You don\'t have permission to access management.',
             type = 'error',
         })
         return

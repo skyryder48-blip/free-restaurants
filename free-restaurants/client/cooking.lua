@@ -136,21 +136,26 @@ end
 -- ============================================================================
 
 --- Check if player has all required ingredients
----@param ingredients table Recipe ingredients { [item] = amount }
+---@param ingredients table Recipe ingredients array { { item = 'name', count = n }, ... }
 ---@return boolean hasAll
 ---@return table missing Missing items { [item] = needed }
 local function hasIngredients(ingredients)
     local missing = {}
     local hasAll = true
-    
-    for item, amount in pairs(ingredients) do
-        local count = exports.ox_inventory:Search('count', item)
-        if count < amount then
-            missing[item] = amount - count
-            hasAll = false
+
+    for _, ingredient in ipairs(ingredients) do
+        local itemName = ingredient.item
+        local requiredCount = ingredient.count or 1
+
+        if itemName then
+            local count = exports.ox_inventory:Search('count', itemName)
+            if not count or count < requiredCount then
+                missing[itemName] = requiredCount - (count or 0)
+                hasAll = false
+            end
         end
     end
-    
+
     return hasAll, missing
 end
 

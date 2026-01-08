@@ -39,6 +39,7 @@ local modelCache = {}
 
 -- Forward declarations for functions used before definition
 local hideStationHUD
+local updateStationHUD
 local getAvailableRecipes
 local canCraftRecipe
 local startCookingAtSlot
@@ -975,7 +976,7 @@ end
 --- Update the station HUD with current slot data
 ---@param stationKey string
 ---@param slotData table
-local function updateStationHUD(stationKey, slotData)
+updateStationHUD = function(stationKey, slotData)
     if not hudVisible then return end
     
     SendNUIMessage({
