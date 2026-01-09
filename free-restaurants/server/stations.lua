@@ -73,11 +73,15 @@ local function initializeStation(locationKey, stationKey, numSlots)
     if not stationSlots[locationKey] then
         stationSlots[locationKey] = {}
     end
-    
+
     if not stationSlots[locationKey][stationKey] then
         stationSlots[locationKey][stationKey] = {}
-        
-        for i = 1, numSlots do
+    end
+
+    -- Create any missing slots (handles both new stations and expanding existing ones)
+    local slotsAdded = false
+    for i = 1, numSlots do
+        if not stationSlots[locationKey][stationKey][i] then
             stationSlots[locationKey][stationKey][i] = {
                 occupied = false,
                 playerId = nil,
@@ -89,8 +93,11 @@ local function initializeStation(locationKey, stationKey, numSlots)
                 progress = 0,
                 quality = 100,
             }
+            slotsAdded = true
         end
-        
+    end
+
+    if slotsAdded then
         syncStationState(locationKey, stationKey)
     end
 end
@@ -133,8 +140,20 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
     local slotData = getSlotData(locationKey, stationKey, slotIndex)
     if not slotData then
         -- Initialize station if needed (get capacity from config)
-        local stationConfig = Config.Stations.Types[stationKey:match('(%w+)_%d*$') or stationKey]
+        -- Get station type from location config, not by parsing the station key
+        local stationType = nil
+        local locationConfig = Config.Locations and Config.Locations[locationKey]
+        if locationConfig and locationConfig.stations and locationConfig.stations[stationKey] then
+            stationType = locationConfig.stations[stationKey].type
+        end
+
+        local stationConfig = stationType and Config.Stations.Types[stationType]
         local numSlots = stationConfig and stationConfig.capacity and stationConfig.capacity.slots or 1
+
+        print(('[free-restaurants] Initializing station %s/%s with %d slots (type: %s)'):format(
+            locationKey, stationKey, math.max(numSlots, slotIndex), tostring(stationType)
+        ))
+
         initializeStation(locationKey, stationKey, math.max(numSlots, slotIndex))
         slotData = getSlotData(locationKey, stationKey, slotIndex)
     end
