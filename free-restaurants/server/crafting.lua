@@ -513,16 +513,21 @@ lib.callback.register('free-restaurants:server:returnBatchIngredients', function
 end)
 
 --- Complete batch craft callback (ingredients already consumed)
-lib.callback.register('free-restaurants:server:completeBatchCraft', function(source, recipeId, amount, locationKey, avgFreshness)
+lib.callback.register('free-restaurants:server:completeBatchCraft', function(source, recipeId, amount, locationKey, avgFreshness, finalQuality)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false, 'Player not found' end
 
     local recipe = Config.Recipes.Items[recipeId]
     if not recipe then return false, 'Invalid recipe' end
 
-    -- Calculate quality (batch crafting is slightly lower quality)
-    local batchQualityPenalty = 0.9 -- 90% of normal quality
-    local finalQuality = calculateItemQuality(batchQualityPenalty, avgFreshness or 100)
+    -- Use passed quality or calculate with penalty
+    local itemQuality
+    if finalQuality then
+        itemQuality = calculateItemQuality(finalQuality, avgFreshness or 100)
+    else
+        local batchQualityPenalty = 0.9 -- 90% of normal quality
+        itemQuality = calculateItemQuality(batchQualityPenalty, avgFreshness or 100)
+    end
 
     -- Create items
     local resultItem = type(recipe.result) == 'table' and recipe.result.item or recipe.result
@@ -530,10 +535,10 @@ lib.callback.register('free-restaurants:server:completeBatchCraft', function(sou
     local totalItems = resultAmount * amount
 
     local metadata = {
-        quality = finalQuality,
+        quality = itemQuality,
         craftedAt = os.time(),
         craftedBy = player.PlayerData.citizenid,
-        freshness = finalQuality,
+        freshness = itemQuality,
     }
 
     local success = exports.ox_inventory:AddItem(source, resultItem, totalItems, metadata)
@@ -544,7 +549,7 @@ lib.callback.register('free-restaurants:server:completeBatchCraft', function(sou
     -- Award XP (reduced for batch)
     local baseXP = recipe.xpReward or 10
     local batchXP = math.floor(baseXP * amount * 0.75) -- 75% XP per item in batch
-    awardCraftXP(source, recipe, finalQuality)
+    awardCraftXP(source, recipe, itemQuality)
 
     -- Track tasks
     for i = 1, amount do
@@ -554,7 +559,66 @@ lib.callback.register('free-restaurants:server:completeBatchCraft', function(sou
     print(('[free-restaurants] Player %s batch crafted %dx %s'):format(
         player.PlayerData.citizenid, amount, recipeId
     ))
-    
+
+    return true, nil
+end)
+
+--- Complete multi-slot batch craft - items stay at slots for any player to pick up
+lib.callback.register('free-restaurants:server:completeBatchCraftMultiSlot', function(source, recipeId, amount, locationKey, stationKey, claimedSlots, avgFreshness, finalQuality)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false, 'Player not found' end
+
+    local recipe = Config.Recipes.Items[recipeId]
+    if not recipe then return false, 'Invalid recipe' end
+
+    -- Use passed quality or calculate
+    local itemQuality
+    if finalQuality then
+        itemQuality = calculateItemQuality(finalQuality, avgFreshness or 100)
+    else
+        itemQuality = calculateItemQuality(1.0, avgFreshness or 100)
+    end
+
+    -- Mark slots as ready for pickup (don't give items directly)
+    -- Items will be given when player picks up from slot
+    local resultItem = type(recipe.result) == 'table' and recipe.result.item or recipe.result
+    local resultAmount = type(recipe.result) == 'table' and recipe.result.count or 1
+
+    -- Store pending items at each slot
+    local fullStationKey = ('%s_%s'):format(locationKey, stationKey)
+
+    for i, slotIndex in ipairs(claimedSlots) do
+        -- Mark slot as having a ready item (stored in server state for pickup)
+        local slotKey = ('%s_slot%d'):format(fullStationKey, slotIndex)
+
+        -- Store pending pickup info (this would typically be in stationSlots state)
+        TriggerClientEvent('free-restaurants:client:slotReadyForPickup', -1, {
+            locationKey = locationKey,
+            stationKey = stationKey,
+            slotIndex = slotIndex,
+            recipeId = recipeId,
+            item = resultItem,
+            amount = resultAmount,
+            quality = itemQuality,
+            craftedBy = player.PlayerData.citizenid,
+            craftedByName = player.PlayerData.charinfo.firstname .. ' ' .. player.PlayerData.charinfo.lastname,
+        })
+    end
+
+    -- Award XP (reduced for batch)
+    local baseXP = recipe.xpReward or 10
+    local batchXP = math.floor(baseXP * amount * 0.75) -- 75% XP per item in batch
+    awardCraftXP(source, recipe, itemQuality)
+
+    -- Track tasks
+    for i = 1, amount do
+        exports['free-restaurants']:IncrementTasks(source)
+    end
+
+    print(('[free-restaurants] Player %s completed multi-slot batch: %dx %s at slots %s'):format(
+        player.PlayerData.citizenid, amount, recipeId, table.concat(claimedSlots, ', ')
+    ))
+
     return true, nil
 end)
 
