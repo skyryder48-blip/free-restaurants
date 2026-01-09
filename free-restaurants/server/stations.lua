@@ -140,9 +140,22 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
     local slotData = getSlotData(locationKey, stationKey, slotIndex)
     if not slotData then
         -- Initialize station if needed (get capacity from config)
-        -- Get station type from location config, not by parsing the station key
+        -- Location keys are formatted as "restaurant_sublocation" (e.g., "tacofarmer_pilsen")
+        -- Config is nested: Config.Locations['tacofarmer']['pilsen']
         local stationType = nil
-        local locationConfig = Config.Locations and Config.Locations[locationKey]
+        local locationConfig = nil
+
+        -- Try direct lookup first (flat structure)
+        if Config.Locations and Config.Locations[locationKey] then
+            locationConfig = Config.Locations[locationKey]
+        else
+            -- Try nested lookup (restaurant_sublocation -> Config.Locations[restaurant][sublocation])
+            local restaurant, sublocation = locationKey:match('([^_]+)_(.+)')
+            if restaurant and sublocation and Config.Locations and Config.Locations[restaurant] then
+                locationConfig = Config.Locations[restaurant][sublocation]
+            end
+        end
+
         if locationConfig and locationConfig.stations and locationConfig.stations[stationKey] then
             stationType = locationConfig.stations[stationKey].type
         end
