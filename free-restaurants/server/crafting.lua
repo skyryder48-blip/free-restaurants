@@ -677,6 +677,10 @@ lib.callback.register('free-restaurants:server:storeAtStation', function(source,
     -- Track task completion
     exports['free-restaurants']:IncrementTasks(source)
 
+    -- Mark slot as ready for pickup - this clears playerSlots so player can craft elsewhere
+    -- while keeping the slot occupied for the pending item
+    exports['free-restaurants']:MarkSlotForPickup(source, locationKey, stationKey, slotIndex)
+
     print(('[free-restaurants] Player %s crafted %s - stored at station %s slot %d (quality: %d)'):format(
         player.PlayerData.citizenid, recipeId, stationKey, slotIndex, finalQuality
     ))
@@ -705,6 +709,10 @@ lib.callback.register('free-restaurants:server:pickupFromStation', function(sour
 
     -- Clear pending item
     pendingStationItems[pendingKey] = nil
+
+    -- Release the slot so it can be used again
+    -- Use playerId 0 for forced release since the original crafter may have disconnected
+    exports['free-restaurants']:ReleaseSlot(0, locationKey, stationKey, slotIndex, 'completed')
 
     print(('[free-restaurants] Player %s picked up %s from station %s slot %d'):format(
         player.PlayerData.citizenid, pendingItem.itemName, stationKey, slotIndex
@@ -770,6 +778,10 @@ lib.callback.register('free-restaurants:server:handleBurnOrSpill', function(sour
 
     -- Clear pending item (it's destroyed/burnt/spilled)
     pendingStationItems[pendingKey] = nil
+
+    -- Release the slot so it can be used again
+    local status = isBurn and 'burnt' or 'spilled'
+    exports['free-restaurants']:ReleaseSlot(0, locationKey, stationKey, slotIndex, status)
 
     return true, {
         wasBurn = isBurn,
