@@ -1583,9 +1583,16 @@ local function onCookingComplete(data)
     local fullStationKey = ('%s_%s'):format(data.locationKey, data.stationKey)
     local slotIndex = data.slotIndex
 
+    -- Always clear player's active station tracking - they're done crafting
+    -- (pending pickups are tracked separately)
+    if currentStation == fullStationKey and currentSlot == slotIndex then
+        currentStation = nil
+        currentSlot = nil
+        FreeRestaurants.Client.UpdatePlayerState('activeStation', nil)
+    end
+
     -- Handle 'ready_for_pickup' status - item stays at station
     if data.status == 'ready_for_pickup' then
-        -- Don't release slot yet - item is waiting for pickup
         -- Start pickup timer if this station has timeout
         local pickupConfig = data.pickupConfig
         if pickupConfig and pickupConfig.required then
@@ -1610,17 +1617,15 @@ local function onCookingComplete(data)
             end
         end
 
-        -- Keep the slot marked as in-use until pickup
+        -- Keep the slot marked as in-use until pickup (but player can use other stations)
         -- Update slot state to 'ready'
         if stationSlots[fullStationKey] and stationSlots[fullStationKey][slotIndex] then
             stationSlots[fullStationKey][slotIndex].status = 'ready'
             stationSlots[fullStationKey][slotIndex].recipeLabel = data.recipeLabel
         end
 
-        -- Hide HUD if this was our station
-        if currentStation == fullStationKey then
-            hideStationHUD()
-        end
+        -- Hide HUD
+        hideStationHUD()
         return
     end
 
@@ -1632,10 +1637,8 @@ local function onCookingComplete(data)
         cleanupSlot(fullStationKey, slotIndex)
     end
 
-    -- Hide HUD if this was our station
-    if currentStation == fullStationKey then
-        hideStationHUD()
-    end
+    -- Hide HUD
+    hideStationHUD()
 end
 
 -- ============================================================================
