@@ -60,6 +60,7 @@ local updateFireVisuals
 local scheduleFireEscalation
 local scheduleFireSpread
 local spreadFire
+local escalateFire
 
 -- ============================================================================
 -- FOOD PROP DEFINITIONS
@@ -791,7 +792,7 @@ end
 --- Escalate fire to next stage
 ---@param stationKey string
 ---@param slotIndex number
-local function escalateFire(stationKey, slotIndex)
+escalateFire = function(stationKey, slotIndex)
     local fireKey = getFireKey(stationKey, slotIndex)
     local state = fireState[fireKey]
     

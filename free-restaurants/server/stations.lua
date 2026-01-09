@@ -19,8 +19,9 @@
 -- Station slot data: [locationKey][stationKey][slotIndex] = SlotData
 local stationSlots = {}
 
--- Player to slot mapping for quick lookup
-local playerSlots = {}  -- [playerId] = { locationKey, stationKey, slotIndex }
+-- Player to slot mapping for quick lookup - now tracks MULTIPLE slots per player
+-- [playerId] = { [slotKey] = { locationKey, stationKey, slotIndex }, ... }
+local playerSlots = {}
 
 -- Slot timeout handles
 local slotTimeouts = {}
@@ -120,21 +121,12 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
         playerId, locationKey, stationKey, slotIndex
     ))
 
-    -- Check if player already has a slot
-    if playerSlots[playerId] then
-        -- Allow same slot re-claim (for recipe change)
-        local existing = playerSlots[playerId]
-        print(('[free-restaurants] Player %d has existing slot: %s/%s/%d'):format(
-            playerId, existing.locationKey, existing.stationKey, existing.slotIndex
-        ))
-        if existing.locationKey ~= locationKey or
-           existing.stationKey ~= stationKey or
-           existing.slotIndex ~= slotIndex then
-            print(('[free-restaurants] REJECTED: Player already has a different slot'):format())
-            return false
-        end
-    else
-        print(('[free-restaurants] Player %d has no existing slot'):format(playerId))
+    -- Generate a unique key for this slot
+    local slotKey = ('%s:%s:%d'):format(locationKey, stationKey, slotIndex)
+
+    -- Check if player already has THIS SPECIFIC slot (allow re-claim for recipe change)
+    if playerSlots[playerId] and playerSlots[playerId][slotKey] then
+        print(('[free-restaurants] Player %d re-claiming existing slot %s'):format(playerId, slotKey))
     end
 
     -- Get slot data
@@ -152,19 +144,19 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
         return false
     end
 
-    -- Check if slot is available
+    -- Check if slot is available (not occupied by another player)
     if slotData.occupied and slotData.playerId ~= playerId then
         print(('[free-restaurants] REJECTED: Slot occupied by player %s'):format(tostring(slotData.playerId)))
         return false
     end
-    
+
     -- Get player name
     local player = exports.qbx_core:GetPlayer(playerId)
     local playerName = player and ('%s %s'):format(
         player.PlayerData.charinfo.firstname,
         player.PlayerData.charinfo.lastname
     ) or ('Player %d'):format(playerId)
-    
+
     -- Claim the slot
     slotData.occupied = true
     slotData.playerId = playerId
@@ -174,22 +166,27 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
     slotData.startTime = os.time()
     slotData.progress = 0
     slotData.quality = 100
-    
-    -- Track player's slot
-    playerSlots[playerId] = {
+
+    -- Track player's slot (allow multiple slots per player)
+    if not playerSlots[playerId] then
+        playerSlots[playerId] = {}
+    end
+    playerSlots[playerId][slotKey] = {
         locationKey = locationKey,
         stationKey = stationKey,
         slotIndex = slotIndex,
     }
-    
+
     -- Set timeout for slot
     setSlotTimeout(playerId, locationKey, stationKey, slotIndex)
-    
+
     -- Sync state
     syncStationState(locationKey, stationKey)
-    
-    print(('[free-restaurants] Player %d claimed slot %d at %s/%s'):format(
-        playerId, slotIndex, locationKey, stationKey
+
+    local numSlots = 0
+    for _ in pairs(playerSlots[playerId]) do numSlots = numSlots + 1 end
+    print(('[free-restaurants] Player %d claimed slot %d at %s/%s (now has %d active slots)'):format(
+        playerId, slotIndex, locationKey, stationKey, numSlots
     ))
     
     return true
@@ -204,19 +201,19 @@ end
 ---@return boolean success
 local function releaseSlot(playerId, locationKey, stationKey, slotIndex, status)
     local slotData = getSlotData(locationKey, stationKey, slotIndex)
-    
+
     if not slotData then
         return false
     end
-    
-    -- Verify ownership (or allow forced release)
-    if slotData.playerId and slotData.playerId ~= playerId then
-        -- Only allow if player is admin or slot timed out
-        if slotData.playerId ~= 0 then  -- 0 = server forced release
-            return false
-        end
+
+    -- Verify ownership (or allow forced release with playerId = 0)
+    if slotData.playerId and slotData.playerId ~= playerId and playerId ~= 0 then
+        return false
     end
-    
+
+    -- Get the actual owner for clearing player tracking
+    local ownerId = slotData.playerId
+
     -- Clear slot
     slotData.occupied = false
     slotData.playerId = nil
@@ -227,27 +224,28 @@ local function releaseSlot(playerId, locationKey, stationKey, slotIndex, status)
     slotData.cookTime = nil
     slotData.progress = 0
     slotData.quality = 100
-    
-    -- Clear player tracking
-    if playerSlots[playerId] then
-        local tracked = playerSlots[playerId]
-        if tracked.locationKey == locationKey and 
-           tracked.stationKey == stationKey and 
-           tracked.slotIndex == slotIndex then
-            playerSlots[playerId] = nil
+    slotData.pendingPickupBy = nil
+
+    -- Clear player tracking (remove this specific slot from player's slots)
+    local slotKey = ('%s:%s:%d'):format(locationKey, stationKey, slotIndex)
+    if ownerId and playerSlots[ownerId] and playerSlots[ownerId][slotKey] then
+        playerSlots[ownerId][slotKey] = nil
+        -- Clean up empty table
+        if next(playerSlots[ownerId]) == nil then
+            playerSlots[ownerId] = nil
         end
     end
-    
+
     -- Clear timeout
     clearSlotTimeout(locationKey, stationKey, slotIndex)
-    
+
     -- Sync state
     syncStationState(locationKey, stationKey)
-    
+
     print(('[free-restaurants] Slot %d released at %s/%s (status: %s)'):format(
         slotIndex, locationKey, stationKey, status or 'unknown'
     ))
-    
+
     return true
 end
 
@@ -280,27 +278,22 @@ local function markSlotForPickup(playerId, locationKey, stationKey, slotIndex)
 
     -- Update slot to ready_for_pickup status
     -- Keep occupied = true so no one can use the slot
-    -- But remove playerId from playerSlots so they can craft elsewhere
+    -- But remove from playerSlots so they can craft elsewhere
     slotData.status = 'ready_for_pickup'
     slotData.pendingPickupBy = playerId  -- Track who can pick up
 
-    -- Clear player tracking - this allows them to craft at other slots/stations
-    if playerSlots[playerId] then
-        local tracked = playerSlots[playerId]
-        print(('[free-restaurants] Checking playerSlots: tracked=%s/%s/%d vs requested=%s/%s/%d'):format(
-            tracked.locationKey, tracked.stationKey, tracked.slotIndex,
-            locationKey, stationKey, slotIndex
-        ))
-        if tracked.locationKey == locationKey and
-           tracked.stationKey == stationKey and
-           tracked.slotIndex == slotIndex then
+    -- Clear player tracking for this specific slot - allows them to craft at other slots/stations
+    local slotKey = ('%s:%s:%d'):format(locationKey, stationKey, slotIndex)
+    if playerSlots[playerId] and playerSlots[playerId][slotKey] then
+        playerSlots[playerId][slotKey] = nil
+        print(('[free-restaurants] Removed slot %s from playerSlots[%d]'):format(slotKey, playerId))
+        -- Clean up empty table
+        if next(playerSlots[playerId]) == nil then
             playerSlots[playerId] = nil
-            print(('[free-restaurants] Cleared playerSlots[%d] - player can now craft elsewhere'):format(playerId))
-        else
-            print(('[free-restaurants] playerSlots NOT cleared - tracked slot does not match'))
+            print(('[free-restaurants] Cleared empty playerSlots[%d]'):format(playerId))
         end
     else
-        print(('[free-restaurants] playerSlots[%d] was already nil'):format(playerId))
+        print(('[free-restaurants] playerSlots[%d][%s] was already nil'):format(playerId, slotKey))
     end
 
     -- Clear the cooking timeout since crafting is complete
@@ -516,19 +509,26 @@ RegisterNetEvent('free-restaurants:server:fireExtinguished', function(data)
     clearFire(data.stationKey, data.slotIndex)
 end)
 
--- Player dropped - release their slots
+-- Player dropped - release all their slots
 AddEventHandler('playerDropped', function(reason)
     local playerId = source
-    
+
     if playerSlots[playerId] then
-        local slot = playerSlots[playerId]
-        releaseSlot(
-            playerId,
-            slot.locationKey,
-            slot.stationKey,
-            slot.slotIndex,
-            'disconnected'
-        )
+        -- Make a copy of keys to iterate since we're modifying during iteration
+        local slotsToRelease = {}
+        for slotKey, slot in pairs(playerSlots[playerId]) do
+            table.insert(slotsToRelease, slot)
+        end
+
+        for _, slot in ipairs(slotsToRelease) do
+            releaseSlot(
+                playerId,
+                slot.locationKey,
+                slot.stationKey,
+                slot.slotIndex,
+                'disconnected'
+            )
+        end
     end
 end)
 
@@ -616,8 +616,18 @@ end)
 
 exports('GetSlotData', getSlotData)
 
-exports('GetPlayerSlot', function(playerId)
+exports('GetPlayerSlots', function(playerId)
     return playerSlots[playerId]
+end)
+
+-- Legacy: Returns first slot if any (for backwards compatibility)
+exports('GetPlayerSlot', function(playerId)
+    if playerSlots[playerId] then
+        for _, slot in pairs(playerSlots[playerId]) do
+            return slot  -- Return first slot found
+        end
+    end
+    return nil
 end)
 
 exports('GetActiveFires', function()
