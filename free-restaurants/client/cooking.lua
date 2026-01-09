@@ -29,6 +29,8 @@ local executeCraftingSteps
 local completeCrafting
 local failCrafting
 local clearCraftingProps
+local openBatchCraft
+local batchCraft
 
 -- ============================================================================
 -- SKILL CHECK SYSTEM
@@ -640,7 +642,7 @@ end
 ---@param recipeId string Recipe identifier
 ---@param recipeData table Recipe configuration
 ---@param stationData table Active station data
-local function openBatchCraft(recipeId, recipeData, stationData)
+openBatchCraft = function(recipeId, recipeData, stationData)
     -- Calculate max craftable based on ingredients (using array format)
     local maxCraftable = 999
     for _, ingredient in ipairs(recipeData.ingredients) do
@@ -685,7 +687,7 @@ end
 ---@param recipeData table
 ---@param stationData table
 ---@param amount number
-local function batchCraft(recipeId, recipeData, stationData, amount)
+batchCraft = function(recipeId, recipeData, stationData, amount)
     if isCrafting then return end
 
     -- Consume ingredients FIRST (before progress starts)
