@@ -1177,6 +1177,67 @@ end
 -- STATION INTERACTION
 -- ============================================================================
 
+--- Get count of available (empty) slots at a station
+---@param locationKey string
+---@param stationKey string
+---@param stationTypeConfig table
+---@return number availableSlots
+local function getAvailableSlotCount(locationKey, stationKey, stationTypeConfig)
+    local totalSlots = stationTypeConfig.capacity and stationTypeConfig.capacity.slots or 1
+    local availableCount = 0
+    local cacheKey = ('%s_%s'):format(locationKey, stationKey)
+
+    for slotIdx = 1, totalSlots do
+        local slotState = getSlotState(locationKey, stationKey, slotIdx)
+        if not slotState.occupied then
+            availableCount = availableCount + 1
+        end
+    end
+
+    return availableCount
+end
+
+--- Get list of available slot indices at a station
+---@param locationKey string
+---@param stationKey string
+---@param stationTypeConfig table
+---@return table availableSlots Array of available slot indices
+local function getAvailableSlots(locationKey, stationKey, stationTypeConfig)
+    local totalSlots = stationTypeConfig.capacity and stationTypeConfig.capacity.slots or 1
+    local available = {}
+
+    for slotIdx = 1, totalSlots do
+        local slotState = getSlotState(locationKey, stationKey, slotIdx)
+        if not slotState.occupied then
+            table.insert(available, slotIdx)
+        end
+    end
+
+    return available
+end
+
+--- Calculate max batch size based on ingredients and available slots
+---@param recipe table
+---@param availableSlots number
+---@return number maxBatch
+local function calculateMaxBatchSize(recipe, availableSlots)
+    if availableSlots <= 1 then return 1 end
+
+    local maxByIngredients = 999
+    if recipe.ingredients then
+        for _, ingredient in ipairs(recipe.ingredients) do
+            local itemName = ingredient.item
+            local requiredCount = ingredient.count or 1
+            local playerCount = exports.ox_inventory:Search('count', itemName)
+            local possible = math.floor(playerCount / requiredCount)
+            maxByIngredients = math.min(maxByIngredients, possible)
+        end
+    end
+
+    -- Max batch is limited by available slots
+    return math.min(maxByIngredients, availableSlots)
+end
+
 --- Called when player selects a station slot
 ---@param locationKey string
 ---@param stationKey string
@@ -1188,7 +1249,7 @@ onStationSlotSelected = function(locationKey, stationKey, slotIndex, stationData
 
     -- Show recipe selection menu
     local recipes = getAvailableRecipes(stationData.type)
-    
+
     if #recipes == 0 then
         lib.notify({
             title = 'No Recipes',
@@ -1197,30 +1258,172 @@ onStationSlotSelected = function(locationKey, stationKey, slotIndex, stationData
         })
         return
     end
-    
+
+    -- Get available slot count for batch info
+    local availableSlotCount = getAvailableSlotCount(locationKey, stationKey, stationTypeConfig)
+    local totalSlots = stationTypeConfig.capacity and stationTypeConfig.capacity.slots or 1
+
     local menuOptions = {}
-    
+
     for _, recipe in ipairs(recipes) do
         local canCraft, reason = canCraftRecipe(recipe)
-        
+        local maxBatch = calculateMaxBatchSize(recipe, availableSlotCount)
+
+        -- Single craft option
         table.insert(menuOptions, {
             title = recipe.label,
-            description = reason or ('Cook Time: %ds'):format(recipe.cookTime / 1000),
+            description = reason or ('Cook Time: %ds'):format((recipe.cookTime or 5000) / 1000),
             icon = recipe.icon or 'fa-solid fa-utensils',
             disabled = not canCraft,
             onSelect = function()
                 startCookingAtSlot(locationKey, stationKey, slotIndex, recipe, stationData, stationTypeConfig)
             end,
         })
+
+        -- Batch craft option (only show if more than 1 slot available and can craft more than 1)
+        if maxBatch > 1 and canCraft then
+            table.insert(menuOptions, {
+                title = ('  ↳ Batch Craft %s'):format(recipe.label),
+                description = ('Craft multiple (up to %d based on slots & ingredients)'):format(maxBatch),
+                icon = 'fa-solid fa-layer-group',
+                disabled = false,
+                onSelect = function()
+                    openBatchCraftMenu(locationKey, stationKey, recipe, stationData, stationTypeConfig, maxBatch)
+                end,
+            })
+        end
     end
-    
+
+    -- Add header info about slots
+    table.insert(menuOptions, 1, {
+        title = ('Available Slots: %d/%d'):format(availableSlotCount, totalSlots),
+        description = 'Each crafted item uses one slot until collected',
+        icon = 'fa-solid fa-info-circle',
+        disabled = true,
+    })
+
     lib.registerContext({
         id = 'station_recipe_select',
         title = stationData.label,
         options = menuOptions,
     })
-    
+
     lib.showContext('station_recipe_select')
+end
+
+--- Open batch craft amount selection menu
+---@param locationKey string
+---@param stationKey string
+---@param recipe table
+---@param stationData table
+---@param stationTypeConfig table
+---@param maxBatch number
+local function openBatchCraftMenu(locationKey, stationKey, recipe, stationData, stationTypeConfig, maxBatch)
+    local input = lib.inputDialog(('Batch Craft: %s'):format(recipe.label), {
+        {
+            type = 'number',
+            label = 'Amount to Craft',
+            description = ('Max: %d (based on available slots & ingredients)'):format(maxBatch),
+            default = math.min(3, maxBatch),
+            min = 2,
+            max = maxBatch,
+        },
+    })
+
+    if not input then return end
+
+    local amount = input[1]
+    if amount < 2 or amount > maxBatch then
+        lib.notify({
+            title = 'Invalid Amount',
+            description = ('Choose between 2 and %d'):format(maxBatch),
+            type = 'error',
+        })
+        return
+    end
+
+    -- Start batch crafting with slot-based output
+    startBatchCookingAtStation(locationKey, stationKey, recipe, stationData, stationTypeConfig, amount)
+end
+
+--- Start batch cooking - each item goes to a separate slot
+---@param locationKey string
+---@param stationKey string
+---@param recipe table
+---@param stationData table
+---@param stationTypeConfig table
+---@param amount number
+local function startBatchCookingAtStation(locationKey, stationKey, recipe, stationData, stationTypeConfig, amount)
+    local fullStationKey = ('%s_%s'):format(locationKey, stationKey)
+
+    -- Get available slots
+    local availableSlots = getAvailableSlots(locationKey, stationKey, stationTypeConfig)
+
+    if #availableSlots < amount then
+        lib.notify({
+            title = 'Not Enough Slots',
+            description = ('Need %d slots, only %d available'):format(amount, #availableSlots),
+            type = 'error',
+        })
+        return
+    end
+
+    -- Claim all needed slots
+    local claimedSlots = {}
+    for i = 1, amount do
+        local slotIndex = availableSlots[i]
+        local success = claimSlot(locationKey, stationKey, slotIndex, recipe.id)
+
+        if not success then
+            -- Release any already claimed slots
+            for _, claimedSlot in ipairs(claimedSlots) do
+                releaseSlot(locationKey, stationKey, claimedSlot, 'cancelled')
+            end
+            lib.notify({
+                title = 'Slot Unavailable',
+                description = 'Some slots were taken. Please try again.',
+                type = 'error',
+            })
+            return
+        end
+
+        table.insert(claimedSlots, slotIndex)
+    end
+
+    print(('[free-restaurants] CLIENT: Claimed %d slots for batch: %s'):format(amount, table.concat(claimedSlots, ', ')))
+
+    -- Show HUD
+    showStationHUD(fullStationKey, stationData.type, stationTypeConfig.capacity.slots or 1)
+
+    -- Spawn props at all claimed slots
+    local slotPositions = calculateSlotPositions(
+        stationData.coords,
+        stationData.type,
+        stationTypeConfig.capacity.slots or 1,
+        stationData.heading or 0.0
+    )
+
+    for _, slotIndex in ipairs(claimedSlots) do
+        local slotPos = slotPositions[slotIndex]
+        local propType = recipe.propType or recipe.id
+        spawnFoodProp(fullStationKey, slotIndex, propType, 'raw', slotPos.coords, slotPos.heading)
+    end
+
+    -- Use first slot as primary for cooking workflow
+    local primarySlot = claimedSlots[1]
+    local primarySlotPos = slotPositions[primarySlot]
+
+    -- Trigger batch cooking workflow
+    TriggerEvent('free-restaurants:client:startBatchCrafting', recipe.id, recipe, {
+        locationKey = locationKey,
+        stationKey = stationKey,
+        claimedSlots = claimedSlots,
+        primarySlot = primarySlot,
+        stationData = stationData,
+        stationTypeConfig = stationTypeConfig,
+        slotCoords = primarySlotPos.coords,
+        batchAmount = amount,
+    })
 end
 
 --- Check if a recipe can use a specific station type

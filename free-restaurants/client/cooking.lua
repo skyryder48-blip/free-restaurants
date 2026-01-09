@@ -703,60 +703,15 @@ executeCraftingSteps = function(recipeData, stationData, batchSize)
             quality = math.floor((totalQuality / math.max(1, i - 1)) * 100),
         })
 
-        -- Calculate scaled duration for batch crafting
-        -- Batch duration scales with diminishing returns: baseTime * (1 + 0.3 * ln(batchSize))
-        local baseDuration = step.duration or (recipeData.craftTime or 5000) / stepCount
-        local scaledDuration = baseDuration
-        if batchSize > 1 then
-            scaledDuration = baseDuration * (1 + 0.3 * math.log(batchSize))
-        end
-
-        -- Get action for sound
+        -- Get action for sound and minigame type
         local action = step.action or step.step or step.type or 'cook'
         local actionConfig = ActionMinigameMap[action] or {}
 
-        -- Start looping cooking sound for this step
-        if actionConfig.sound then
-            playCookingSound(actionConfig.sound, true)
-        end
+        -- Check if this step requires a skill check
+        local requiresSkillCheck = step.skillCheck ~= false
 
-        -- Play progress bar
-        local progressSuccess = lib.progressCircle({
-            duration = scaledDuration,
-            label = stepLabel,
-            useWhileDead = false,
-            canCancel = true,
-            disable = {
-                move = not step.allowMove,
-                car = true,
-                combat = true,
-            },
-            anim = step.anim and {
-                dict = step.anim.dict,
-                clip = step.anim.clip,
-                flag = step.anim.flag or 49,
-            } or nil,
-            prop = step.prop and {
-                model = step.prop.model,
-                bone = step.prop.bone,
-                pos = step.prop.pos,
-                rot = step.prop.rot,
-            } or nil,
-        })
-
-        -- Stop looping sound
-        if actionConfig.sound then
-            stopCookingSound(actionConfig.sound)
-        end
-
-        if not progressSuccess then
-            -- Player cancelled - stop all sounds
-            stopAllCookingSounds()
-            return false, 0
-        end
-
-        -- Do skill check if required for this step
-        if step.skillCheck ~= false then
+        if requiresSkillCheck then
+            -- SKILL CHECK STEP: The skill check IS the cooking action
             -- Get difficulty based on tier with player skill adjustment
             local explicitDifficulty = nil
             if type(step.skillCheck) == 'table' and step.skillCheck.difficulty then
@@ -768,26 +723,57 @@ executeCraftingSteps = function(recipeData, stationData, batchSize)
             local difficulty = getAdjustedDifficulty(playerSkill, recipeTier, explicitDifficulty)
 
             -- Build skill check config from recipe and step overrides
-            -- Priority: step.skillCheck > recipeData.skillCheck > global config
             local skillCheckConfig = nil
             if type(step.skillCheck) == 'table' then
-                -- Step has explicit skill check configuration
                 skillCheckConfig = step.skillCheck
             elseif recipeData.skillCheck then
-                -- Recipe has global skill check configuration
                 skillCheckConfig = recipeData.skillCheck
             end
 
-            -- Show skill check prompt
+            -- Start looping cooking sound
+            if actionConfig.sound then
+                playCookingSound(actionConfig.sound, true)
+            end
+
+            -- Show what we're doing with a brief prep progress
+            local prepDuration = math.min(2000, (step.duration or 5000) * 0.3)
+            local prepSuccess = lib.progressCircle({
+                duration = prepDuration,
+                label = 'Preparing: ' .. stepLabel,
+                useWhileDead = false,
+                canCancel = true,
+                disable = {
+                    move = not step.allowMove,
+                    car = true,
+                    combat = true,
+                },
+                anim = step.anim and {
+                    dict = step.anim.dict,
+                    clip = step.anim.clip,
+                    flag = step.anim.flag or 49,
+                } or nil,
+            })
+
+            if not prepSuccess then
+                stopAllCookingSounds()
+                return false, 0
+            end
+
+            -- Now the skill check IS the cooking action
             lib.notify({
-                title = 'Skill Check',
-                description = step.label or ('Complete the %s'):format(action),
+                title = stepLabel,
+                description = 'Complete the action!',
                 type = 'inform',
                 duration = 1500,
             })
-            Wait(500)
+            Wait(300)
 
             local checkSuccess, quality = doSkillCheck(action, difficulty, skillCheckConfig, batchSize)
+
+            -- Stop looping sound
+            if actionConfig.sound then
+                stopCookingSound(actionConfig.sound)
+            end
 
             -- Track result
             table.insert(skillCheckResults, {
@@ -831,8 +817,77 @@ executeCraftingSteps = function(recipeData, stationData, batchSize)
                 })
             end
 
+            -- Finish progress for this step (remaining time)
+            local finishDuration = math.max(1000, (step.duration or 5000) * 0.4)
+            if batchSize > 1 then
+                finishDuration = finishDuration * (1 + 0.2 * math.log(batchSize))
+            end
+
+            local finishSuccess = lib.progressCircle({
+                duration = finishDuration,
+                label = 'Finishing: ' .. stepLabel,
+                useWhileDead = false,
+                canCancel = true,
+                disable = {
+                    move = not step.allowMove,
+                    car = true,
+                    combat = true,
+                },
+            })
+
+            if not finishSuccess then
+                stopAllCookingSounds()
+                return false, 0
+            end
+
             totalQuality = totalQuality + quality
         else
+            -- NO SKILL CHECK: Just progress bar with cooking sounds
+            local baseDuration = step.duration or (recipeData.craftTime or 5000) / stepCount
+            local scaledDuration = baseDuration
+            if batchSize > 1 then
+                scaledDuration = baseDuration * (1 + 0.3 * math.log(batchSize))
+            end
+
+            -- Start looping cooking sound for this step
+            if actionConfig.sound then
+                playCookingSound(actionConfig.sound, true)
+            end
+
+            -- Play progress bar
+            local progressSuccess = lib.progressCircle({
+                duration = scaledDuration,
+                label = stepLabel,
+                useWhileDead = false,
+                canCancel = true,
+                disable = {
+                    move = not step.allowMove,
+                    car = true,
+                    combat = true,
+                },
+                anim = step.anim and {
+                    dict = step.anim.dict,
+                    clip = step.anim.clip,
+                    flag = step.anim.flag or 49,
+                } or nil,
+                prop = step.prop and {
+                    model = step.prop.model,
+                    bone = step.prop.bone,
+                    pos = step.prop.pos,
+                    rot = step.prop.rot,
+                } or nil,
+            })
+
+            -- Stop looping sound
+            if actionConfig.sound then
+                stopCookingSound(actionConfig.sound)
+            end
+
+            if not progressSuccess then
+                stopAllCookingSounds()
+                return false, 0
+            end
+
             totalQuality = totalQuality + 1.0
         end
     end
@@ -1430,9 +1485,145 @@ RegisterNetEvent('free-restaurants:client:startCrafting', function(recipeId, rec
     end
 end)
 
--- Batch craft request
+-- Batch craft request (old method)
 RegisterNetEvent('free-restaurants:client:batchCraft', function(recipeId, recipeData, stationData)
     openBatchCraft(recipeId, recipeData, stationData)
+end)
+
+-- New slot-based batch crafting (from stations.lua)
+RegisterNetEvent('free-restaurants:client:startBatchCrafting', function(recipeId, recipeData, stationData)
+    if isCrafting then
+        lib.notify({
+            title = 'Busy',
+            description = 'You are already crafting something!',
+            type = 'error',
+        })
+        return
+    end
+
+    local amount = stationData.batchAmount or 1
+    local claimedSlots = stationData.claimedSlots or {}
+
+    -- Consume ingredients for batch FIRST
+    local consumeSuccess, avgFreshness = lib.callback.await(
+        'free-restaurants:server:consumeBatchIngredients',
+        false,
+        recipeId,
+        amount
+    )
+
+    if not consumeSuccess then
+        -- Release all claimed slots
+        for _, slotIndex in ipairs(claimedSlots) do
+            lib.callback.await('free-restaurants:server:releaseSlot', false, {
+                locationKey = stationData.locationKey,
+                stationKey = stationData.stationKey,
+                slotIndex = slotIndex,
+                status = 'cancelled',
+            })
+        end
+
+        lib.notify({
+            title = 'Cannot Craft',
+            description = avgFreshness or 'Missing ingredients',
+            type = 'error',
+        })
+        return
+    end
+
+    -- Start batch crafting
+    isCrafting = true
+    currentCraft = {
+        recipeId = recipeId,
+        recipeData = recipeData,
+        stationData = stationData,
+        batchAmount = amount,
+        claimedSlots = claimedSlots,
+        avgFreshness = avgFreshness,
+        ingredientsConsumed = true,
+    }
+
+    FreeRestaurants.Utils.Debug(('Starting slot-based batch craft: %dx %s across slots %s'):format(
+        amount, recipeId, table.concat(claimedSlots, ', ')
+    ))
+
+    -- Execute crafting steps with batch size
+    local success, finalQuality = executeCraftingSteps(recipeData, {
+        locationKey = stationData.locationKey,
+        stationKey = stationData.stationKey,
+        slotIndex = stationData.primarySlot,
+        stationData = stationData.stationData,
+        slotCoords = stationData.slotCoords,
+    }, amount)
+
+    if success then
+        -- Complete batch - give items and mark all slots as ready for pickup
+        local serverSuccess, message = lib.callback.await(
+            'free-restaurants:server:completeBatchCraftMultiSlot',
+            false,
+            recipeId,
+            amount,
+            stationData.locationKey,
+            stationData.stationKey,
+            claimedSlots,
+            avgFreshness,
+            finalQuality
+        )
+
+        if serverSuccess then
+            lib.notify({
+                title = 'Batch Complete!',
+                description = ('Crafted %dx %s - ready for pickup at station'):format(amount, recipeData.label),
+                type = 'success',
+            })
+
+            -- Update all slot props to cooked state
+            local fullStationKey = ('%s_%s'):format(stationData.locationKey, stationData.stationKey)
+            for _, slotIndex in ipairs(claimedSlots) do
+                TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+                    locationKey = stationData.locationKey,
+                    stationKey = stationData.stationKey,
+                    slotIndex = slotIndex,
+                    stationType = stationData.stationData and stationData.stationData.type or 'grill',
+                    status = 'ready',
+                    progress = 100,
+                    quality = math.floor((finalQuality or 1.0) * 100),
+                })
+            end
+        else
+            lib.notify({
+                title = 'Batch Failed',
+                description = message or 'Something went wrong!',
+                type = 'error',
+            })
+        end
+    else
+        -- Cancelled - return ingredients and release slots
+        lib.callback.await(
+            'free-restaurants:server:returnBatchIngredients',
+            false,
+            recipeId,
+            amount
+        )
+
+        for _, slotIndex in ipairs(claimedSlots) do
+            lib.callback.await('free-restaurants:server:releaseSlot', false, {
+                locationKey = stationData.locationKey,
+                stationKey = stationData.stationKey,
+                slotIndex = slotIndex,
+                status = 'cancelled',
+            })
+        end
+
+        lib.notify({
+            title = 'Cancelled',
+            description = 'Batch crafting cancelled. Ingredients returned.',
+            type = 'inform',
+        })
+    end
+
+    isCrafting = false
+    currentCraft = nil
 end)
 
 -- Cancel crafting (e.g., when leaving area)
