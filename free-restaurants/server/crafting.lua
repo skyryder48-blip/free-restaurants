@@ -745,7 +745,21 @@ lib.callback.register('free-restaurants:server:handleBurnOrSpill', function(sour
 
     local stationType = nil
     -- Try to get station type from config
-    local locationConfig = Config.Locations and Config.Locations[locationKey]
+    -- Location keys are formatted as "restaurant_sublocation" (e.g., "tacofarmer_pilsen")
+    -- Config is nested: Config.Locations['tacofarmer']['pilsen']
+    local locationConfig = nil
+
+    -- Try direct lookup first (flat structure)
+    if Config.Locations and Config.Locations[locationKey] then
+        locationConfig = Config.Locations[locationKey]
+    else
+        -- Try nested lookup (restaurant_sublocation -> Config.Locations[restaurant][sublocation])
+        local restaurant, sublocation = locationKey:match('([^_]+)_(.+)')
+        if restaurant and sublocation and Config.Locations and Config.Locations[restaurant] then
+            locationConfig = Config.Locations[restaurant][sublocation]
+        end
+    end
+
     if locationConfig and locationConfig.stations and locationConfig.stations[stationKey] then
         stationType = locationConfig.stations[stationKey].type
     end
