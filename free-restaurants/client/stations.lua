@@ -57,6 +57,9 @@ local deleteFoodProp
 local stopParticleEffect
 local cleanupSlot
 local updateFireVisuals
+local scheduleFireEscalation
+local scheduleFireSpread
+local spreadFire
 
 -- ============================================================================
 -- FOOD PROP DEFINITIONS
@@ -757,7 +760,7 @@ end
 --- Schedule fire escalation
 ---@param stationKey string
 ---@param slotIndex number
-local function scheduleFireEscalation(stationKey, slotIndex)
+scheduleFireEscalation = function(stationKey, slotIndex)
     local fireKey = getFireKey(stationKey, slotIndex)
     local state = fireState[fireKey]
     
@@ -826,7 +829,7 @@ end
 --- Schedule fire spreading
 ---@param stationKey string
 ---@param slotIndex number
-local function scheduleFireSpread(stationKey, slotIndex)
+scheduleFireSpread = function(stationKey, slotIndex)
     local fireKey = getFireKey(stationKey, slotIndex)
     local state = fireState[fireKey]
     
@@ -840,7 +843,7 @@ end
 --- Spread fire to nearby areas
 ---@param stationKey string
 ---@param slotIndex number
-local function spreadFire(stationKey, slotIndex)
+spreadFire = function(stationKey, slotIndex)
     local fireKey = getFireKey(stationKey, slotIndex)
     local state = fireState[fireKey]
     
