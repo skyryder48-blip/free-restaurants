@@ -14,6 +14,8 @@
     - qbx_core
 ]]
 
+print('[free-restaurants] server/crafting.lua loading...')
+
 -- Forward declarations for functions used before definition
 local calculateLevel
 
@@ -312,6 +314,8 @@ end
 -- ============================================================================
 -- CALLBACKS
 -- ============================================================================
+
+print('[free-restaurants] Registering crafting callbacks...')
 
 --- Consume ingredients at start of crafting
 lib.callback.register('free-restaurants:server:consumeIngredients', function(source, recipeId)
