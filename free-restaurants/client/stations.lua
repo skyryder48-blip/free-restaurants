@@ -1055,7 +1055,6 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
             icon = 'fa-solid fa-fire-burner',
             -- Removed groups filter - canInteract checks duty status instead
             canInteract = function()
-                -- Debug: Log all checks
                 local isOnDuty = FreeRestaurants.Client.IsOnDuty()
                 local slotState = getSlotState(locationKey, stationKey, slotIndex)
                 local hasCanCook = FreeRestaurants.Client.HasPermission('canCook')
@@ -1584,12 +1583,22 @@ local function onCookingComplete(data)
     local fullStationKey = ('%s_%s'):format(data.locationKey, data.stationKey)
     local slotIndex = data.slotIndex
 
-    -- Always clear player's active station tracking - they're done crafting
-    -- (pending pickups are tracked separately)
+    print(('[free-restaurants] CLIENT onCookingComplete: station=%s, slot=%d, status=%s'):format(
+        fullStationKey, slotIndex, tostring(data.status)
+    ))
+    print(('[free-restaurants] CLIENT currentStation=%s, currentSlot=%s'):format(
+        tostring(currentStation), tostring(currentSlot)
+    ))
+
+    -- Always clear player's active station tracking when crafting completes
+    -- This allows them to use other stations (pending pickups are tracked separately)
     if currentStation == fullStationKey and currentSlot == slotIndex then
         currentStation = nil
         currentSlot = nil
         FreeRestaurants.Client.UpdatePlayerState('activeStation', nil)
+        print('[free-restaurants] CLIENT cleared currentStation and currentSlot')
+    else
+        print('[free-restaurants] CLIENT did NOT clear - station/slot mismatch')
     end
 
     -- Handle 'ready_for_pickup' status - item stays at station
