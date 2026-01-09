@@ -56,6 +56,7 @@ local onStationSlotSelected
 local deleteFoodProp
 local stopParticleEffect
 local cleanupSlot
+local updateFireVisuals
 
 -- ============================================================================
 -- FOOD PROP DEFINITIONS
@@ -713,7 +714,7 @@ end
 --- Update fire visuals based on current stage
 ---@param stationKey string
 ---@param slotIndex number
-local function updateFireVisuals(stationKey, slotIndex)
+updateFireVisuals = function(stationKey, slotIndex)
     local fireKey = getFireKey(stationKey, slotIndex)
     local state = fireState[fireKey]
     
