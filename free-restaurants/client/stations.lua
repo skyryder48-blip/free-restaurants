@@ -386,19 +386,25 @@ end
 ---@param recipeId string
 ---@return boolean success
 local function claimSlot(locationKey, stationKey, slotIndex, recipeId)
+    print(('[free-restaurants] CLIENT claimSlot: location=%s, station=%s, slot=%d, recipe=%s'):format(
+        locationKey, stationKey, slotIndex, tostring(recipeId)
+    ))
+
     local success = lib.callback.await('free-restaurants:server:claimSlot', false, {
         locationKey = locationKey,
         stationKey = stationKey,
         slotIndex = slotIndex,
         recipeId = recipeId,
     })
-    
+
+    print(('[free-restaurants] CLIENT claimSlot result: %s'):format(tostring(success)))
+
     if success then
         currentStation = ('%s_%s'):format(locationKey, stationKey)
         currentSlot = slotIndex
         FreeRestaurants.Client.UpdatePlayerState('activeStation', currentStation)
     end
-    
+
     return success
 end
 
@@ -1324,10 +1330,15 @@ end
 startCookingAtSlot = function(locationKey, stationKey, slotIndex, recipe, stationData, stationTypeConfig)
     local fullStationKey = ('%s_%s'):format(locationKey, stationKey)
 
+    print(('[free-restaurants] CLIENT startCookingAtSlot: station=%s, slot=%d, recipe=%s'):format(
+        fullStationKey, slotIndex, recipe.id
+    ))
+
     -- Claim the slot on server
     local success = claimSlot(locationKey, stationKey, slotIndex, recipe.id)
 
     if not success then
+        print('[free-restaurants] CLIENT startCookingAtSlot: claim failed, showing notification')
         lib.notify({
             title = 'Slot Unavailable',
             description = 'This slot is already in use.',
@@ -1335,6 +1346,8 @@ startCookingAtSlot = function(locationKey, stationKey, slotIndex, recipe, statio
         })
         return
     end
+
+    print('[free-restaurants] CLIENT startCookingAtSlot: claim succeeded, continuing...')
 
     -- Show HUD
     showStationHUD(fullStationKey, stationData.type, stationTypeConfig.capacity.slots or 1)
