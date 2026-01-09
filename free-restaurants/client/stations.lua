@@ -1893,8 +1893,9 @@ RegisterNetEvent('free-restaurants:client:syncFire', function(data)
     
     -- Ensure fire is visually burning
     if data.coords then
-        StartScriptFire(data.coords.x, data.coords.y, data.coords.z, 
-            math.min(25, (data.level or 1) * 3), data.level > 2)
+        local fireLevel = data.level or 1
+        StartScriptFire(data.coords.x, data.coords.y, data.coords.z,
+            math.min(25, fireLevel * 3), fireLevel > 2)
     end
     
     FreeRestaurants.Utils.Debug(('Synced fire: %s level %d'):format(fireKey, data.level or 1))

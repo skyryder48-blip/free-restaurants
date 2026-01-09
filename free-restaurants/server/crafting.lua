@@ -601,6 +601,10 @@ end
 
 --- Store a crafted item at the station for pickup (instead of giving directly)
 lib.callback.register('free-restaurants:server:storeAtStation', function(source, recipeId, quality, locationKey, stationKey, slotIndex, avgFreshness)
+    print(('[free-restaurants] storeAtStation called: player=%d, recipe=%s, location=%s, station=%s, slot=%d'):format(
+        source, recipeId, locationKey, stationKey, slotIndex
+    ))
+
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false, 'Player not found' end
 
@@ -679,7 +683,11 @@ lib.callback.register('free-restaurants:server:storeAtStation', function(source,
 
     -- Mark slot as ready for pickup - this clears playerSlots so player can craft elsewhere
     -- while keeping the slot occupied for the pending item
-    exports['free-restaurants']:MarkSlotForPickup(source, locationKey, stationKey, slotIndex)
+    print(('[free-restaurants] About to call MarkSlotForPickup for player %d at %s/%s slot %d'):format(
+        source, locationKey, stationKey, slotIndex
+    ))
+    local markResult = exports['free-restaurants']:MarkSlotForPickup(source, locationKey, stationKey, slotIndex)
+    print(('[free-restaurants] MarkSlotForPickup returned: %s'):format(tostring(markResult)))
 
     print(('[free-restaurants] Player %s crafted %s - stored at station %s slot %d (quality: %d)'):format(
         player.PlayerData.citizenid, recipeId, stationKey, slotIndex, finalQuality
