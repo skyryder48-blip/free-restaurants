@@ -49,7 +49,7 @@ client_scripts {
 -- Server scripts
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
-    'config/stations.lua',
+    -- 'config/stations.lua',  -- REMOVED: Duplicate of server/stations.lua causing conflicts
     'server/main.lua',
     'server/banking.lua',
     'server/duty.lua',

@@ -138,6 +138,8 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
 
     -- Get slot data
     local slotData = getSlotData(locationKey, stationKey, slotIndex)
+    print(('[free-restaurants] getSlotData returned: %s'):format(slotData and 'exists' or 'nil'))
+
     if not slotData then
         -- Initialize station if needed (get capacity from config)
         -- Location keys are formatted as "restaurant_sublocation" (e.g., "tacofarmer_pilsen")
@@ -148,16 +150,26 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
         -- Try direct lookup first (flat structure)
         if Config.Locations and Config.Locations[locationKey] then
             locationConfig = Config.Locations[locationKey]
+            print(('[free-restaurants] Found location config via direct lookup'):format())
         else
             -- Try nested lookup (restaurant_sublocation -> Config.Locations[restaurant][sublocation])
             local restaurant, sublocation = locationKey:match('([^_]+)_(.+)')
+            print(('[free-restaurants] Trying nested lookup: restaurant=%s, sublocation=%s'):format(
+                tostring(restaurant), tostring(sublocation)
+            ))
             if restaurant and sublocation and Config.Locations and Config.Locations[restaurant] then
                 locationConfig = Config.Locations[restaurant][sublocation]
+                print(('[free-restaurants] Found location config via nested lookup: %s'):format(
+                    locationConfig and 'yes' or 'no'
+                ))
             end
         end
 
         if locationConfig and locationConfig.stations and locationConfig.stations[stationKey] then
             stationType = locationConfig.stations[stationKey].type
+            print(('[free-restaurants] Found station type: %s'):format(tostring(stationType)))
+        else
+            print(('[free-restaurants] Could not find station config for %s'):format(stationKey))
         end
 
         local stationConfig = stationType and Config.Stations.Types[stationType]
@@ -169,6 +181,7 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
 
         initializeStation(locationKey, stationKey, math.max(numSlots, slotIndex))
         slotData = getSlotData(locationKey, stationKey, slotIndex)
+        print(('[free-restaurants] After init, getSlotData returned: %s'):format(slotData and 'exists' or 'nil'))
     end
 
     if not slotData then
