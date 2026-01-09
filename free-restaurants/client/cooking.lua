@@ -1,14 +1,15 @@
 --[[
     free-restaurants Client Cooking System
-    
+
     Handles:
     - Crafting workflows with multi-step processes
-    - Skill check minigames (skillbar, circle, keys)
-    - Progress bar animations
-    - Quality calculations
+    - Skill check minigames (skillbar, circle, keys, rapid, sequence)
+    - Progress bar animations with immersive feedback
+    - Quality calculations based on performance
     - XP rewards and progression
     - Ingredient validation
-    
+    - Batch crafting with scaled difficulty
+
     DEPENDENCIES:
     - client/main.lua (state management)
     - client/stations.lua (station management)
@@ -23,6 +24,7 @@
 local isCrafting = false
 local currentCraft = nil
 local craftingProps = {}
+local activeSounds = {}
 
 -- Forward declarations for functions used before definition
 local executeCraftingSteps
@@ -31,73 +33,381 @@ local failCrafting
 local clearCraftingProps
 local openBatchCraft
 local batchCraft
+local playCookingSound
+local stopCookingSound
+
+-- ============================================================================
+-- COOKING SOUNDS SYSTEM
+-- ============================================================================
+
+-- Sound definitions for different cooking actions
+local CookingSounds = {
+    grill = { name = 'grill_sizzle', ref = 'DLC_CASINO_NIGHTCLUB_SFX_SOUNDS' },
+    fry = { name = 'fry_bubbling', ref = 'DLC_CASINO_NIGHTCLUB_SFX_SOUNDS' },
+    chop = { name = 'knife_chop', ref = 'HUD_FRONTEND_DEFAULT_SOUNDSET' },
+    blend = { name = 'blender_whir', ref = 'DLC_CASINO_NIGHTCLUB_SFX_SOUNDS' },
+    pour = { name = 'liquid_pour', ref = 'HUD_LIQUOR_SOUNDSET' },
+    steam = { name = 'steam_hiss', ref = 'DLC_CASINO_NIGHTCLUB_SFX_SOUNDS' },
+    plate = { name = 'plate_clink', ref = 'HUD_FRONTEND_DEFAULT_SOUNDSET' },
+    success = { name = 'PICK_UP_MONEY', ref = 'HUD_FRONTEND_DEFAULT_SOUNDSET' },
+    fail = { name = 'ERROR', ref = 'HUD_FRONTEND_DEFAULT_SOUNDSET' },
+    timer_warning = { name = 'TIMER_STOP', ref = 'HUD_MINI_GAME_SOUNDSET' },
+}
+
+--- Play a cooking sound effect
+---@param soundType string The type of sound to play
+---@param loop boolean|nil Whether to loop the sound
+playCookingSound = function(soundType, loop)
+    if not Config.Immersion.Sounds.enabled then return end
+
+    local sound = CookingSounds[soundType]
+    if not sound then return end
+
+    local soundId = GetSoundId()
+    if loop then
+        -- For looping sounds, we'll use ambient approach
+        PlaySoundFromEntity(soundId, sound.name, cache.ped, sound.ref, false, 0)
+        activeSounds[soundType] = soundId
+    else
+        PlaySoundFrontend(soundId, sound.name, sound.ref, true)
+        ReleaseSoundId(soundId)
+    end
+end
+
+--- Stop a looping cooking sound
+---@param soundType string The type of sound to stop
+stopCookingSound = function(soundType)
+    local soundId = activeSounds[soundType]
+    if soundId then
+        StopSound(soundId)
+        ReleaseSoundId(soundId)
+        activeSounds[soundType] = nil
+    end
+end
+
+--- Stop all active cooking sounds
+local function stopAllCookingSounds()
+    for soundType, soundId in pairs(activeSounds) do
+        StopSound(soundId)
+        ReleaseSoundId(soundId)
+    end
+    activeSounds = {}
+end
+
+-- ============================================================================
+-- TIER-BASED DIFFICULTY SYSTEM
+-- ============================================================================
+
+-- Tier to base difficulty mapping
+local TierDifficultyMap = {
+    basic = 'easy',
+    standard = 'medium',
+    advanced = 'hard',
+    signature = 'expert',
+}
+
+-- Extended difficulty parameters including 'expert' level
+local DifficultyParams = {
+    easy = {
+        areaSize = 50,
+        speedMultiplier = 0.7,
+        zones = 1,          -- Number of skill check zones
+        keyCount = 3,       -- Number of keys for rapid/sequence checks
+        timePerKey = 800,   -- ms per key press
+        mistakesAllowed = 2,
+    },
+    medium = {
+        areaSize = 40,
+        speedMultiplier = 1.0,
+        zones = 2,
+        keyCount = 4,
+        timePerKey = 650,
+        mistakesAllowed = 1,
+    },
+    hard = {
+        areaSize = 28,
+        speedMultiplier = 1.3,
+        zones = 3,
+        keyCount = 5,
+        timePerKey = 500,
+        mistakesAllowed = 1,
+    },
+    expert = {
+        areaSize = 20,
+        speedMultiplier = 1.6,
+        zones = 4,
+        keyCount = 6,
+        timePerKey = 400,
+        mistakesAllowed = 0,
+    },
+}
+
+-- Action to minigame type mapping for immersive cooking experience
+local ActionMinigameMap = {
+    -- Grill actions - timing-based (hit the sweet spot)
+    cook_patty = { type = 'skillbar', sound = 'grill' },
+    cook_patties = { type = 'skillbar', sound = 'grill' },
+    grill = { type = 'skillbar', sound = 'grill' },
+    cook_bacon = { type = 'skillbar', sound = 'grill' },
+    cook_sausage = { type = 'skillbar', sound = 'grill' },
+
+    -- Frying actions - precision timing (multiple zones)
+    fry = { type = 'circle', sound = 'fry' },
+    fry_chicken = { type = 'circle', sound = 'fry' },
+    fry_fish = { type = 'circle', sound = 'fry' },
+    fry_fries = { type = 'circle', sound = 'fry' },
+    fry_onion_rings = { type = 'circle', sound = 'fry' },
+
+    -- Prep actions - rapid key presses (chopping motion)
+    prep = { type = 'rapid', sound = 'chop' },
+    chop = { type = 'rapid', sound = 'chop' },
+    prep_veggies = { type = 'rapid', sound = 'chop' },
+    dice = { type = 'rapid', sound = 'chop' },
+    slice = { type = 'rapid', sound = 'chop' },
+    bread_chicken = { type = 'keys', sound = 'chop' },
+    bread_fish = { type = 'keys', sound = 'chop' },
+
+    -- Assembly actions - sequence memory (assembly order)
+    assemble = { type = 'sequence', sound = 'plate' },
+    build = { type = 'sequence', sound = 'plate' },
+    stack = { type = 'sequence', sound = 'plate' },
+    fold_and_seal = { type = 'keys', sound = 'plate' },
+
+    -- Blending actions - hold steady (keep in zone)
+    blend = { type = 'hold', sound = 'blend' },
+    mix = { type = 'hold', sound = 'blend' },
+    shake = { type = 'hold', sound = 'blend' },
+
+    -- Coffee/Drink actions - precision pour
+    brew_espresso = { type = 'skillbar', sound = 'steam' },
+    brew_double = { type = 'skillbar', sound = 'steam' },
+    steam_milk = { type = 'hold', sound = 'steam' },
+    microfoam = { type = 'hold', sound = 'steam' },
+    pour = { type = 'circle', sound = 'pour' },
+    pour_art = { type = 'sequence', sound = 'pour' },
+    layer = { type = 'sequence', sound = 'pour' },
+
+    -- Baking actions - timing
+    bake = { type = 'skillbar', sound = 'steam' },
+
+    -- Plating/Finishing - precision
+    plate = { type = 'keys', sound = 'plate' },
+    finish = { type = 'keys', sound = 'plate' },
+    garnish = { type = 'keys', sound = 'plate' },
+    add_toppings = { type = 'keys', sound = 'plate' },
+    stretch_dough = { type = 'hold', sound = 'chop' },
+}
 
 -- ============================================================================
 -- SKILL CHECK SYSTEM
 -- ============================================================================
 
---- Get skill check difficulty based on player skill and config
----@param baseSkill number Player's skill level
----@param recipeDifficulty string Recipe difficulty ('easy', 'medium', 'hard')
+--- Get difficulty based on recipe tier with player skill adjustment
+---@param playerSkill number Player's skill level (0-100)
+---@param recipeTier string Recipe tier ('basic', 'standard', 'advanced', 'signature')
+---@param explicitDifficulty string|nil Explicit difficulty override
 ---@return string difficulty Adjusted difficulty
-local function getAdjustedDifficulty(baseSkill, recipeDifficulty)
+local function getAdjustedDifficulty(playerSkill, recipeTier, explicitDifficulty)
+    -- Use explicit difficulty if provided
+    local baseDifficulty = explicitDifficulty or TierDifficultyMap[recipeTier] or 'medium'
+
     if not Config.Cooking.SkillChecks.difficulty.skillScaling then
-        return recipeDifficulty
+        return baseDifficulty
     end
-    
+
     local scalingFactor = Config.Cooking.SkillChecks.difficulty.scalingFactor or 0.05
-    local reduction = baseSkill * scalingFactor
-    
-    local difficulties = { 'easy', 'medium', 'hard' }
+    local reduction = playerSkill * scalingFactor
+
+    local difficulties = { 'easy', 'medium', 'hard', 'expert' }
     local difficultyIndex = {
         easy = 1,
         medium = 2,
         hard = 3,
+        expert = 4,
     }
-    
-    local currentIndex = difficultyIndex[recipeDifficulty] or 2
-    local newIndex = math.max(1, currentIndex - math.floor(reduction / 0.15))
-    
+
+    local currentIndex = difficultyIndex[baseDifficulty] or 2
+    -- Each 20 skill levels reduces difficulty by 1 tier
+    local newIndex = math.max(1, currentIndex - math.floor(reduction / 0.20))
+
     local minDifficulty = Config.Cooking.SkillChecks.difficulty.minimumDifficulty or 'easy'
     local minIndex = difficultyIndex[minDifficulty] or 1
     newIndex = math.max(minIndex, newIndex)
-    
+
     return difficulties[newIndex]
 end
 
 --- Get skill check parameters based on difficulty
----@param difficulty string 'easy', 'medium', 'hard'
+---@param difficulty string 'easy', 'medium', 'hard', 'expert'
 ---@return table params Skill check parameters
 local function getSkillCheckParams(difficulty)
-    local params = {
-        easy = {
-            areaSize = 50,
-            speedMultiplier = 0.8,
-            duration = 6000,
-        },
-        medium = {
-            areaSize = 40,
-            speedMultiplier = 1.0,
-            duration = 5000,
-        },
-        hard = {
-            areaSize = 25,
-            speedMultiplier = 1.3,
-            duration = 4000,
-        },
-    }
-    
-    return params[difficulty] or params.medium
+    return DifficultyParams[difficulty] or DifficultyParams.medium
 end
 
---- Execute a skill check
+--- Scale difficulty for batch crafting
+---@param baseParams table Base difficulty parameters
+---@param batchSize number Number of items being crafted
+---@return table scaledParams Scaled parameters
+local function scaleDifficultyForBatch(baseParams, batchSize)
+    if batchSize <= 1 then return baseParams end
+
+    local scaled = {}
+    for k, v in pairs(baseParams) do
+        scaled[k] = v
+    end
+
+    -- Scale difficulty based on batch size (diminishing returns)
+    local scaleFactor = 1 + (math.log(batchSize) * 0.15)
+
+    -- Smaller target area
+    scaled.areaSize = math.max(15, math.floor(baseParams.areaSize / scaleFactor))
+    -- Faster speed
+    scaled.speedMultiplier = baseParams.speedMultiplier * scaleFactor
+    -- More keys/zones for larger batches
+    scaled.keyCount = math.min(8, baseParams.keyCount + math.floor(batchSize / 3))
+    scaled.zones = math.min(5, baseParams.zones + math.floor(batchSize / 4))
+    -- Less time per action
+    scaled.timePerKey = math.max(300, math.floor(baseParams.timePerKey / scaleFactor))
+
+    return scaled
+end
+
+--- Execute a multi-zone skill check (for advanced/signature recipes)
+---@param zones number Number of zones to complete
+---@param params table Skill check parameters
+---@param keys table Keys to use
+---@return boolean success
+---@return number quality Quality based on performance (0.0-1.0)
+local function doMultiZoneSkillCheck(zones, params, keys)
+    local successCount = 0
+    local totalQuality = 0
+
+    for i = 1, zones do
+        -- Vary zone sizes for difficulty progression
+        local zoneSize = params.areaSize - ((i - 1) * 3)
+        zoneSize = math.max(15, zoneSize)
+
+        local zoneParams = { zoneSize }
+
+        -- Add speed multiplier for harder zones
+        if i > 1 then
+            zoneParams = { { areaSize = zoneSize, speedMultiplier = params.speedMultiplier + ((i - 1) * 0.1) } }
+        end
+
+        local success = lib.skillCheck(zoneParams, keys)
+
+        if success then
+            successCount = successCount + 1
+            totalQuality = totalQuality + 1.0
+        else
+            totalQuality = totalQuality + 0.4
+            if params.mistakesAllowed == 0 then
+                -- Expert mode: any failure ends the check
+                return false, totalQuality / zones
+            end
+        end
+
+        -- Small delay between zones for rhythm
+        if i < zones then
+            Wait(200)
+        end
+    end
+
+    local quality = totalQuality / zones
+    local success = successCount >= (zones - (params.mistakesAllowed or 1))
+
+    return success, quality
+end
+
+--- Execute a rapid key press skill check (for chopping/prep actions)
+---@param params table Skill check parameters
+---@return boolean success
+---@return number quality Quality based on performance (0.0-1.0)
+local function doRapidKeySkillCheck(params)
+    local keys = { 'w', 'a', 's', 'd' }
+    local keySequence = {}
+
+    -- Generate random key sequence
+    for i = 1, params.keyCount do
+        keySequence[i] = keys[math.random(1, #keys)]
+    end
+
+    -- Build skill check with progressively smaller zones
+    local zones = {}
+    for i = 1, params.keyCount do
+        local zoneSize = params.areaSize - ((i - 1) * 2)
+        zones[i] = math.max(20, zoneSize)
+    end
+
+    local success = lib.skillCheck(zones, keySequence)
+    local quality = success and 1.0 or 0.5
+
+    return success, quality
+end
+
+--- Execute a sequence memory skill check (for assembly actions)
+---@param params table Skill check parameters
+---@return boolean success
+---@return number quality Quality based on performance (0.0-1.0)
+local function doSequenceSkillCheck(params)
+    local keys = { 'w', 'a', 's', 'd' }
+    local sequence = {}
+
+    -- Generate a sequence the player must follow
+    for i = 1, params.keyCount do
+        sequence[i] = keys[math.random(1, #keys)]
+    end
+
+    -- Show the sequence to memorize briefly via notification
+    lib.notify({
+        title = 'Assembly Order',
+        description = 'Follow: ' .. table.concat(sequence, ' → '),
+        type = 'inform',
+        duration = 2000 + (params.keyCount * 300),
+    })
+
+    Wait(2000 + (params.keyCount * 300))
+
+    -- Now player must input the sequence
+    local zones = {}
+    for i = 1, params.keyCount do
+        zones[i] = params.areaSize
+    end
+
+    local success = lib.skillCheck(zones, sequence)
+    local quality = success and 1.0 or 0.5
+
+    return success, quality
+end
+
+--- Execute a hold-steady skill check (for blending/steaming actions)
+---@param params table Skill check parameters
+---@return boolean success
+---@return number quality Quality based on performance (0.0-1.0)
+local function doHoldSkillCheck(params)
+    -- Use circle style with two zones that require holding
+    local primarySize = params.areaSize + 10
+    local secondarySize = params.areaSize
+
+    local success = lib.skillCheck(
+        { primarySize, secondarySize },
+        { 'e', 'e' }
+    )
+
+    local quality = success and 1.0 or 0.6
+    return success, quality
+end
+
+--- Execute a skill check based on action type
 ---@param action string Action type (prep, cook, plate, etc.)
 ---@param difficulty string Difficulty level
 ---@param recipeSkillCheck table|nil Optional recipe-specific skill check config
+---@param batchSize number|nil Batch size for scaling (default 1)
 ---@return boolean success
 ---@return number quality Quality multiplier (0.0-1.0)
-local function doSkillCheck(action, difficulty, recipeSkillCheck)
+local function doSkillCheck(action, difficulty, recipeSkillCheck, batchSize)
     local settings = Config.Cooking.SkillChecks
+    batchSize = batchSize or 1
 
     -- Check if skill checks are enabled globally
     if not settings.enabled then
@@ -115,44 +425,93 @@ local function doSkillCheck(action, difficulty, recipeSkillCheck)
         return true, 1.0
     end
 
-    -- Get parameters - recipe config overrides global config
+    -- Get parameters based on difficulty
     local useDifficulty = (recipeSkillCheck and recipeSkillCheck.difficulty) or difficulty
     local params = getSkillCheckParams(useDifficulty)
+
+    -- Scale for batch crafting
+    if batchSize > 1 then
+        params = scaleDifficultyForBatch(params, batchSize)
+    end
 
     -- Recipe can override individual parameters
     if recipeSkillCheck then
         if recipeSkillCheck.areaSize then params.areaSize = recipeSkillCheck.areaSize end
         if recipeSkillCheck.speedMultiplier then params.speedMultiplier = recipeSkillCheck.speedMultiplier end
-        if recipeSkillCheck.duration then params.duration = recipeSkillCheck.duration end
+        if recipeSkillCheck.zones then params.zones = recipeSkillCheck.zones end
+        if recipeSkillCheck.keyCount then params.keyCount = recipeSkillCheck.keyCount end
     end
 
-    -- Determine skill check style (recipe overrides global)
-    local style = (recipeSkillCheck and recipeSkillCheck.type) or settings.style.type or 'skillbar'
+    -- Determine minigame type based on action or recipe override
+    local actionConfig = ActionMinigameMap[action] or { type = 'skillbar', sound = nil }
+    local minigameType = (recipeSkillCheck and recipeSkillCheck.type) or actionConfig.type or settings.style.type or 'skillbar'
     local keys = (recipeSkillCheck and recipeSkillCheck.keys) or settings.style.keys or { 'w', 'a', 's', 'd' }
+
+    -- Play action-specific sound
+    if actionConfig.sound then
+        playCookingSound(actionConfig.sound, false)
+    end
 
     local success, quality = false, 0.5
 
-    if style == 'skillbar' then
-        success = lib.skillCheck(
-            { params.areaSize },
-            keys
-        )
-        quality = success and 1.0 or 0.5
+    if minigameType == 'skillbar' then
+        -- Standard timing-based skill check
+        if params.zones > 1 then
+            success, quality = doMultiZoneSkillCheck(params.zones, params, keys)
+        else
+            success = lib.skillCheck(
+                { params.areaSize },
+                keys
+            )
+            quality = success and 1.0 or 0.5
+        end
 
-    elseif style == 'circle' then
+    elseif minigameType == 'circle' then
+        -- Precision timing with multiple zones
         local secondSize = (recipeSkillCheck and recipeSkillCheck.areaSize2) or (params.areaSize - 10)
-        success = lib.skillCheck(
-            { params.areaSize, secondSize },
-            { 'e' }
-        )
+        secondSize = math.max(10, secondSize)
+
+        if params.zones > 2 then
+            -- Multiple precision zones
+            local zones = {}
+            for i = 1, params.zones do
+                zones[i] = params.areaSize - ((i - 1) * 5)
+            end
+            success = lib.skillCheck(zones, { 'e' })
+        else
+            success = lib.skillCheck(
+                { params.areaSize, secondSize },
+                { 'e' }
+            )
+        end
         quality = success and 1.0 or 0.5
 
-    elseif style == 'keys' then
+    elseif minigameType == 'keys' then
+        -- Standard multi-key skill check
         success = lib.skillCheck(
             { params.areaSize },
             keys
         )
         quality = success and 1.0 or 0.5
+
+    elseif minigameType == 'rapid' then
+        -- Rapid key press sequence (chopping)
+        success, quality = doRapidKeySkillCheck(params)
+
+    elseif minigameType == 'sequence' then
+        -- Memory sequence (assembly)
+        success, quality = doSequenceSkillCheck(params)
+
+    elseif minigameType == 'hold' then
+        -- Hold steady (blending/steaming)
+        success, quality = doHoldSkillCheck(params)
+    end
+
+    -- Play success/fail sound
+    if success then
+        playCookingSound('success', false)
+    else
+        playCookingSound('fail', false)
     end
 
     return success, quality
@@ -261,15 +620,21 @@ end
 --- Execute all crafting steps
 ---@param recipeData table Recipe configuration
 ---@param stationData table Station data
+---@param batchSize number|nil Batch size for scaling (default 1)
 ---@return boolean success
 ---@return number quality Final quality multiplier
-executeCraftingSteps = function(recipeData, stationData)
+executeCraftingSteps = function(recipeData, stationData, batchSize)
+    batchSize = batchSize or 1
     local steps = recipeData.steps or recipeData.stations or { { action = 'cook', label = 'Cooking...' } }
     local totalQuality = 0
     local stepCount = #steps
+    local skillCheckResults = {}  -- Track results for quality feedback
 
     -- Get player skill level for this recipe type
     local playerSkill = lib.callback.await('free-restaurants:server:getSkillLevel', false, recipeData.category) or 0
+
+    -- Get recipe tier for difficulty calculation
+    local recipeTier = recipeData.tier or 'basic'
 
     -- Notify stations.lua that cooking is starting
     TriggerEvent('free-restaurants:client:cookingStateUpdate', {
@@ -283,9 +648,42 @@ executeCraftingSteps = function(recipeData, stationData)
         quality = 100,
     })
 
+    -- Show tier-based difficulty notification
+    local tierLabels = {
+        basic = 'Basic',
+        standard = 'Standard',
+        advanced = 'Advanced',
+        signature = 'Signature',
+    }
+    local tierColors = {
+        basic = 'inform',
+        standard = 'success',
+        advanced = 'warning',
+        signature = 'error',
+    }
+
+    if batchSize > 1 then
+        lib.notify({
+            title = ('Batch Crafting: %dx %s'):format(batchSize, recipeData.label),
+            description = ('%s difficulty - Increased challenge for batch!'):format(tierLabels[recipeTier] or 'Standard'),
+            type = tierColors[recipeTier] or 'inform',
+            duration = 3000,
+        })
+    else
+        lib.notify({
+            title = ('Crafting: %s'):format(recipeData.label),
+            description = ('%s difficulty recipe'):format(tierLabels[recipeTier] or 'Standard'),
+            type = tierColors[recipeTier] or 'inform',
+            duration = 2000,
+        })
+    end
+
     for i, step in ipairs(steps) do
-        -- Show step progress
+        -- Show step progress with batch info
         local stepLabel = step.label or ('Step %d/%d'):format(i, stepCount)
+        if batchSize > 1 then
+            stepLabel = stepLabel .. (' (Batch: %dx)'):format(batchSize)
+        end
 
         -- Load animation if specified
         if step.anim then
@@ -302,12 +700,29 @@ executeCraftingSteps = function(recipeData, stationData)
             slotCoords = stationData.slotCoords,
             status = 'cooking',
             progress = stepProgress,
-            quality = 100,
+            quality = math.floor((totalQuality / math.max(1, i - 1)) * 100),
         })
+
+        -- Calculate scaled duration for batch crafting
+        -- Batch duration scales with diminishing returns: baseTime * (1 + 0.3 * ln(batchSize))
+        local baseDuration = step.duration or (recipeData.craftTime or 5000) / stepCount
+        local scaledDuration = baseDuration
+        if batchSize > 1 then
+            scaledDuration = baseDuration * (1 + 0.3 * math.log(batchSize))
+        end
+
+        -- Get action for sound
+        local action = step.action or step.step or step.type or 'cook'
+        local actionConfig = ActionMinigameMap[action] or {}
+
+        -- Start looping cooking sound for this step
+        if actionConfig.sound then
+            playCookingSound(actionConfig.sound, true)
+        end
 
         -- Play progress bar
         local progressSuccess = lib.progressCircle({
-            duration = step.duration or (recipeData.craftTime or 5000) / stepCount,
+            duration = scaledDuration,
             label = stepLabel,
             useWhileDead = false,
             canCancel = true,
@@ -328,16 +743,29 @@ executeCraftingSteps = function(recipeData, stationData)
                 rot = step.prop.rot,
             } or nil,
         })
-        
+
+        -- Stop looping sound
+        if actionConfig.sound then
+            stopCookingSound(actionConfig.sound)
+        end
+
         if not progressSuccess then
-            -- Player cancelled
+            -- Player cancelled - stop all sounds
+            stopAllCookingSounds()
             return false, 0
         end
-        
+
         -- Do skill check if required for this step
         if step.skillCheck ~= false then
-            local action = step.action or step.step or step.type or 'cook'
-            local difficulty = getAdjustedDifficulty(playerSkill, recipeData.difficulty or 'medium')
+            -- Get difficulty based on tier with player skill adjustment
+            local explicitDifficulty = nil
+            if type(step.skillCheck) == 'table' and step.skillCheck.difficulty then
+                explicitDifficulty = step.skillCheck.difficulty
+            elseif recipeData.skillCheck and recipeData.skillCheck.difficulty then
+                explicitDifficulty = recipeData.skillCheck.difficulty
+            end
+
+            local difficulty = getAdjustedDifficulty(playerSkill, recipeTier, explicitDifficulty)
 
             -- Build skill check config from recipe and step overrides
             -- Priority: step.skillCheck > recipeData.skillCheck > global config
@@ -350,7 +778,24 @@ executeCraftingSteps = function(recipeData, stationData)
                 skillCheckConfig = recipeData.skillCheck
             end
 
-            local checkSuccess, quality = doSkillCheck(action, difficulty, skillCheckConfig)
+            -- Show skill check prompt
+            lib.notify({
+                title = 'Skill Check',
+                description = step.label or ('Complete the %s'):format(action),
+                type = 'inform',
+                duration = 1500,
+            })
+            Wait(500)
+
+            local checkSuccess, quality = doSkillCheck(action, difficulty, skillCheckConfig, batchSize)
+
+            -- Track result
+            table.insert(skillCheckResults, {
+                step = i,
+                action = action,
+                success = checkSuccess,
+                quality = quality,
+            })
 
             if not checkSuccess then
                 -- Skill check failed
@@ -360,15 +805,30 @@ executeCraftingSteps = function(recipeData, stationData)
 
                 if failOnMiss then
                     lib.notify({
-                        title = 'Failed',
-                        description = 'You messed up the ' .. (step.failText or 'process') .. '!',
+                        title = 'Failed!',
+                        description = 'You messed up the ' .. (step.failText or action) .. '!',
                         type = 'error',
                     })
+                    stopAllCookingSounds()
                     return false, 0
                 else
                     -- Reduce quality but continue
+                    lib.notify({
+                        title = 'Imperfect',
+                        description = 'Quality reduced - continue with care!',
+                        type = 'warning',
+                        duration = 2000,
+                    })
                     quality = 0.5
                 end
+            else
+                -- Success feedback
+                lib.notify({
+                    title = 'Perfect!',
+                    description = 'Well done!',
+                    type = 'success',
+                    duration = 1500,
+                })
             end
 
             totalQuality = totalQuality + quality
@@ -376,9 +836,32 @@ executeCraftingSteps = function(recipeData, stationData)
             totalQuality = totalQuality + 1.0
         end
     end
-    
+
+    -- Stop any remaining sounds
+    stopAllCookingSounds()
+
     -- Calculate average quality
     local avgQuality = totalQuality / stepCount
+
+    -- Show final quality summary
+    local qualityLabel, _ = FreeRestaurants.Utils.GetQualityLabel(avgQuality * 100)
+    local successCount = 0
+    for _, result in ipairs(skillCheckResults) do
+        if result.success then successCount = successCount + 1 end
+    end
+
+    if #skillCheckResults > 0 then
+        lib.notify({
+            title = 'Cooking Complete',
+            description = ('Quality: %s (%d/%d skill checks passed)'):format(
+                qualityLabel,
+                successCount,
+                #skillCheckResults
+            ),
+            type = avgQuality >= 0.75 and 'success' or (avgQuality >= 0.5 and 'warning' or 'error'),
+            duration = 3000,
+        })
+    end
 
     -- Notify stations.lua that cooking is complete
     TriggerEvent('free-restaurants:client:cookingStateUpdate', {
@@ -492,6 +975,9 @@ end
 --- Handle failed/cancelled crafting
 failCrafting = function()
     if not currentCraft then return end
+
+    -- Stop all cooking sounds
+    stopAllCookingSounds()
 
     local recipeId = currentCraft.recipeId
     local recipeData = currentCraft.recipeData
@@ -682,7 +1168,7 @@ openBatchCraft = function(recipeId, recipeData, stationData)
     batchCraft(recipeId, recipeData, stationData, amount)
 end
 
---- Execute batch crafting
+--- Execute batch crafting with skill checks
 ---@param recipeId string
 ---@param recipeData table
 ---@param stationData table
@@ -717,31 +1203,162 @@ batchCraft = function(recipeId, recipeData, stationData, amount)
         ingredientsConsumed = true,
     }
 
-    -- Notify stations.lua that cooking is starting
-    TriggerEvent('free-restaurants:client:cookingStateUpdate', {
-        locationKey = stationData.locationKey,
-        stationKey = stationData.stationKey,
-        slotIndex = stationData.slotIndex,
-        stationType = stationData.stationData and stationData.stationData.type or 'grill',
-        slotCoords = stationData.slotCoords,
-        status = 'cooking',
-        progress = 0,
-        quality = 100,
-    })
+    FreeRestaurants.Utils.Debug(('Starting batch craft: %dx %s'):format(amount, recipeId))
 
-    local totalTime = (recipeData.craftTime or 5000) * amount
+    -- Use the full crafting steps with skill checks (scaled for batch size)
+    local hasSteps = recipeData.steps or recipeData.stations
+    local success, finalQuality
 
-    -- Progress with updates
-    local success = lib.progressCircle({
-        duration = totalTime,
-        label = ('Crafting %d x %s...'):format(amount, recipeData.label),
-        useWhileDead = false,
-        canCancel = true,
-        disable = {
-            move = true,
-            combat = true,
-        },
-    })
+    if hasSteps and #hasSteps > 0 then
+        -- Execute crafting steps with batch scaling
+        success, finalQuality = executeCraftingSteps(recipeData, stationData, amount)
+    else
+        -- Fallback for recipes without defined steps - use simple progress with periodic skill checks
+        local recipeTier = recipeData.tier or 'basic'
+        local playerSkill = lib.callback.await('free-restaurants:server:getSkillLevel', false, recipeData.category) or 0
+        local difficulty = getAdjustedDifficulty(playerSkill, recipeTier, nil)
+
+        -- Notify stations.lua that cooking is starting
+        TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+            locationKey = stationData.locationKey,
+            stationKey = stationData.stationKey,
+            slotIndex = stationData.slotIndex,
+            stationType = stationData.stationData and stationData.stationData.type or 'grill',
+            slotCoords = stationData.slotCoords,
+            status = 'cooking',
+            progress = 0,
+            quality = 100,
+        })
+
+        -- Calculate total time with diminishing returns: baseTime * amount * (1 + 0.15 * ln(amount))
+        local baseTime = recipeData.craftTime or 5000
+        local totalTime = baseTime * amount * (1 + 0.15 * math.log(amount))
+
+        -- For batches, do periodic skill checks (one per ~3 items, minimum 1)
+        local skillCheckCount = math.max(1, math.floor(amount / 3))
+        local timePerCheck = totalTime / (skillCheckCount + 1)
+
+        local totalQuality = 0
+        local checksPassed = 0
+        success = true
+
+        lib.notify({
+            title = ('Batch Crafting: %dx %s'):format(amount, recipeData.label),
+            description = ('Difficulty scaled for batch - %d skill checks required'):format(skillCheckCount),
+            type = 'warning',
+            duration = 3000,
+        })
+
+        for i = 1, skillCheckCount do
+            -- Progress phase
+            local progressLabel = ('Batch %d/%d (Check %d coming up...)'):format(
+                math.floor((i - 1) * amount / skillCheckCount) + 1,
+                amount,
+                i
+            )
+
+            local progressSuccess = lib.progressCircle({
+                duration = timePerCheck,
+                label = progressLabel,
+                useWhileDead = false,
+                canCancel = true,
+                disable = {
+                    move = true,
+                    combat = true,
+                },
+            })
+
+            if not progressSuccess then
+                success = false
+                break
+            end
+
+            -- Update cooking state
+            local stepProgress = math.floor((i / (skillCheckCount + 1)) * 100)
+            TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+                locationKey = stationData.locationKey,
+                stationKey = stationData.stationKey,
+                slotIndex = stationData.slotIndex,
+                stationType = stationData.stationData and stationData.stationData.type or 'grill',
+                slotCoords = stationData.slotCoords,
+                status = 'cooking',
+                progress = stepProgress,
+                quality = math.floor((totalQuality / math.max(1, i - 1)) * 100),
+            })
+
+            -- Skill check phase
+            lib.notify({
+                title = ('Skill Check %d/%d'):format(i, skillCheckCount),
+                description = 'Batch quality check!',
+                type = 'inform',
+                duration = 1500,
+            })
+            Wait(500)
+
+            local checkSuccess, quality = doSkillCheck('cook', difficulty, nil, amount)
+
+            if checkSuccess then
+                checksPassed = checksPassed + 1
+                totalQuality = totalQuality + 1.0
+                lib.notify({
+                    title = 'Check Passed!',
+                    description = ('Quality maintained - %d/%d'):format(checksPassed, i),
+                    type = 'success',
+                    duration = 1500,
+                })
+            else
+                totalQuality = totalQuality + 0.5
+                lib.notify({
+                    title = 'Check Failed',
+                    description = 'Quality reduced for this batch!',
+                    type = 'warning',
+                    duration = 1500,
+                })
+            end
+        end
+
+        -- Final progress phase
+        if success then
+            local finalProgressSuccess = lib.progressCircle({
+                duration = timePerCheck,
+                label = ('Finishing batch of %d...'):format(amount),
+                useWhileDead = false,
+                canCancel = true,
+                disable = {
+                    move = true,
+                    combat = true,
+                },
+            })
+
+            if not finalProgressSuccess then
+                success = false
+            end
+        end
+
+        if success then
+            finalQuality = totalQuality / skillCheckCount
+
+            -- Notify stations.lua that cooking is complete
+            TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+                locationKey = stationData.locationKey,
+                stationKey = stationData.stationKey,
+                slotIndex = stationData.slotIndex,
+                stationType = stationData.stationData and stationData.stationData.type or 'grill',
+                slotCoords = stationData.slotCoords,
+                status = 'ready',
+                progress = 100,
+                quality = math.floor(finalQuality * 100),
+            })
+
+            local qualityLabel, _ = FreeRestaurants.Utils.GetQualityLabel(finalQuality * 100)
+            lib.notify({
+                title = 'Batch Complete!',
+                description = ('Quality: %s (%d/%d checks passed)'):format(qualityLabel, checksPassed, skillCheckCount),
+                type = finalQuality >= 0.75 and 'success' or 'warning',
+                duration = 3000,
+            })
+        end
+    end
 
     -- Save station data before clearing for the completion event
     local completionData = {
@@ -752,18 +1369,6 @@ batchCraft = function(recipeId, recipeData, stationData, amount)
     }
 
     if success then
-        -- Notify stations.lua that cooking is complete
-        TriggerEvent('free-restaurants:client:cookingStateUpdate', {
-            locationKey = stationData.locationKey,
-            stationKey = stationData.stationKey,
-            slotIndex = stationData.slotIndex,
-            stationType = stationData.stationData and stationData.stationData.type or 'grill',
-            slotCoords = stationData.slotCoords,
-            status = 'ready',
-            progress = 100,
-            quality = 90, -- Batch is slightly lower quality
-        })
-
         -- Complete batch on server (give items)
         local serverSuccess, message = lib.callback.await(
             'free-restaurants:server:completeBatchCraft',
@@ -771,13 +1376,14 @@ batchCraft = function(recipeId, recipeData, stationData, amount)
             recipeId,
             amount,
             stationData.locationKey,
-            avgFreshness
+            avgFreshness,
+            finalQuality  -- Pass quality to server
         )
 
         if serverSuccess then
             lib.notify({
-                title = 'Batch Complete',
-                description = ('Crafted %d x %s'):format(amount, recipeData.label),
+                title = 'Items Ready',
+                description = ('Crafted %dx %s'):format(amount, recipeData.label),
                 type = 'success',
             })
         else

@@ -66,8 +66,10 @@ Config.Cooking = {
     -- Skill Check Configuration
     SkillChecks = {
         enabled = true,                 -- Master toggle for all skill checks
-        
+        failOnMiss = false,             -- Default: continue with reduced quality on fail
+
         -- Per-action toggles (only apply if enabled = true above)
+        -- These map to cooking actions in recipes
         actions = {
             prep = true,                -- Skill check when preparing ingredients
             cook = true,                -- Skill check when cooking
@@ -76,21 +78,55 @@ Config.Cooking = {
             fry = true,                 -- Skill check for deep frying
             grill = true,               -- Skill check for grilling
             bake = true,                -- Skill check for oven items
+            assemble = true,            -- Skill check for assembly
+            chop = true,                -- Skill check for chopping
+            steam = true,               -- Skill check for steaming
+            pour = true,                -- Skill check for pouring
         },
-        
+
         -- Difficulty Settings
+        -- Difficulty is automatically determined by recipe tier:
+        --   basic -> easy, standard -> medium, advanced -> hard, signature -> expert
         difficulty = {
-            base = 'medium',            -- Base difficulty: 'easy', 'medium', 'hard'
+            base = 'medium',            -- Fallback difficulty if tier not specified
             skillScaling = true,        -- Higher player skill = easier checks
             scalingFactor = 0.05,       -- Difficulty reduction per skill level (5%)
             minimumDifficulty = 'easy', -- Lowest difficulty achievable through scaling
         },
-        
-        -- Skill Check Style
+
+        -- Skill Check Style (default, recipes can override)
+        -- Available types:
+        --   'skillbar' - Standard timing bar (good for grilling, baking)
+        --   'circle'   - Precision timing with multiple zones (good for frying)
+        --   'keys'     - Multi-key press (good for plating, finishing)
+        --   'rapid'    - Rapid key sequence (good for chopping, prep)
+        --   'sequence' - Memory sequence (good for assembly)
+        --   'hold'     - Hold steady in zone (good for blending, steaming)
         style = {
-            type = 'skillbar',          -- 'skillbar', 'circle', 'keys'
-            keys = {'w', 'a', 's', 'd'},-- Keys used for 'keys' type
+            type = 'skillbar',          -- Default style
+            keys = {'w', 'a', 's', 'd'},-- Keys used for key-based checks
             duration = 5000,            -- Base duration in ms
+        },
+
+        -- Action-specific minigame defaults
+        -- These define which minigame type is used for each cooking action
+        -- Can be overridden per-recipe or per-step in config/recipes.lua
+        actionTypes = {
+            cook_patty = 'skillbar',
+            cook_patties = 'skillbar',
+            grill = 'skillbar',
+            bake = 'skillbar',
+            fry = 'circle',
+            fry_chicken = 'circle',
+            fry_fish = 'circle',
+            prep = 'rapid',
+            chop = 'rapid',
+            prep_veggies = 'rapid',
+            assemble = 'sequence',
+            blend = 'hold',
+            steam_milk = 'hold',
+            plate = 'keys',
+            garnish = 'keys',
         },
     },
     
