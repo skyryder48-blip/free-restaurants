@@ -239,6 +239,54 @@ local function releaseSlot(playerId, locationKey, stationKey, slotIndex, status)
     return true
 end
 
+--- Mark a slot as ready for pickup (crafting complete, waiting for item pickup)
+--- This clears playerSlots so the player can craft elsewhere, but keeps slot occupied for pickup
+---@param playerId number
+---@param locationKey string
+---@param stationKey string
+---@param slotIndex number
+---@return boolean success
+local function markSlotForPickup(playerId, locationKey, stationKey, slotIndex)
+    local slotData = getSlotData(locationKey, stationKey, slotIndex)
+
+    if not slotData then
+        return false
+    end
+
+    -- Verify ownership
+    if slotData.playerId and slotData.playerId ~= playerId then
+        return false
+    end
+
+    -- Update slot to ready_for_pickup status
+    -- Keep occupied = true so no one can use the slot
+    -- But remove playerId from playerSlots so they can craft elsewhere
+    slotData.status = 'ready_for_pickup'
+    slotData.pendingPickupBy = playerId  -- Track who can pick up
+
+    -- Clear player tracking - this allows them to craft at other slots/stations
+    if playerSlots[playerId] then
+        local tracked = playerSlots[playerId]
+        if tracked.locationKey == locationKey and
+           tracked.stationKey == stationKey and
+           tracked.slotIndex == slotIndex then
+            playerSlots[playerId] = nil
+        end
+    end
+
+    -- Clear the cooking timeout since crafting is complete
+    clearSlotTimeout(locationKey, stationKey, slotIndex)
+
+    -- Sync state
+    syncStationState(locationKey, stationKey)
+
+    print(('[free-restaurants] Slot %d at %s/%s marked for pickup (player %d can now craft elsewhere)'):format(
+        slotIndex, locationKey, stationKey, playerId
+    ))
+
+    return true
+end
+
 --- Update slot status
 ---@param playerId number
 ---@param locationKey string
@@ -527,6 +575,10 @@ end)
 
 exports('ReleaseSlot', function(playerId, locationKey, stationKey, slotIndex, status)
     return releaseSlot(playerId, locationKey, stationKey, slotIndex, status)
+end)
+
+exports('MarkSlotForPickup', function(playerId, locationKey, stationKey, slotIndex)
+    return markSlotForPickup(playerId, locationKey, stationKey, slotIndex)
 end)
 
 exports('UpdateSlot', function(playerId, locationKey, stationKey, slotIndex, updates)
