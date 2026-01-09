@@ -116,17 +116,27 @@ end
 ---@param recipeId string
 ---@return boolean success
 local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
+    print(('[free-restaurants] claimSlot called: player=%d, location=%s, station=%s, slot=%d'):format(
+        playerId, locationKey, stationKey, slotIndex
+    ))
+
     -- Check if player already has a slot
     if playerSlots[playerId] then
         -- Allow same slot re-claim (for recipe change)
         local existing = playerSlots[playerId]
-        if existing.locationKey ~= locationKey or 
-           existing.stationKey ~= stationKey or 
+        print(('[free-restaurants] Player %d has existing slot: %s/%s/%d'):format(
+            playerId, existing.locationKey, existing.stationKey, existing.slotIndex
+        ))
+        if existing.locationKey ~= locationKey or
+           existing.stationKey ~= stationKey or
            existing.slotIndex ~= slotIndex then
+            print(('[free-restaurants] REJECTED: Player already has a different slot'):format())
             return false
         end
+    else
+        print(('[free-restaurants] Player %d has no existing slot'):format(playerId))
     end
-    
+
     -- Get slot data
     local slotData = getSlotData(locationKey, stationKey, slotIndex)
     if not slotData then
@@ -136,13 +146,15 @@ local function claimSlot(playerId, locationKey, stationKey, slotIndex, recipeId)
         initializeStation(locationKey, stationKey, math.max(numSlots, slotIndex))
         slotData = getSlotData(locationKey, stationKey, slotIndex)
     end
-    
+
     if not slotData then
+        print(('[free-restaurants] REJECTED: Could not get/create slot data'))
         return false
     end
-    
+
     -- Check if slot is available
     if slotData.occupied and slotData.playerId ~= playerId then
+        print(('[free-restaurants] REJECTED: Slot occupied by player %s'):format(tostring(slotData.playerId)))
         return false
     end
     
@@ -247,14 +259,22 @@ end
 ---@param slotIndex number
 ---@return boolean success
 local function markSlotForPickup(playerId, locationKey, stationKey, slotIndex)
+    print(('[free-restaurants] markSlotForPickup called: player=%d, location=%s, station=%s, slot=%d'):format(
+        playerId, locationKey, stationKey, slotIndex
+    ))
+
     local slotData = getSlotData(locationKey, stationKey, slotIndex)
 
     if not slotData then
+        print(('[free-restaurants] markSlotForPickup FAILED: no slot data'))
         return false
     end
 
     -- Verify ownership
     if slotData.playerId and slotData.playerId ~= playerId then
+        print(('[free-restaurants] markSlotForPickup FAILED: wrong owner (slot=%s, caller=%d)'):format(
+            tostring(slotData.playerId), playerId
+        ))
         return false
     end
 
@@ -267,11 +287,20 @@ local function markSlotForPickup(playerId, locationKey, stationKey, slotIndex)
     -- Clear player tracking - this allows them to craft at other slots/stations
     if playerSlots[playerId] then
         local tracked = playerSlots[playerId]
+        print(('[free-restaurants] Checking playerSlots: tracked=%s/%s/%d vs requested=%s/%s/%d'):format(
+            tracked.locationKey, tracked.stationKey, tracked.slotIndex,
+            locationKey, stationKey, slotIndex
+        ))
         if tracked.locationKey == locationKey and
            tracked.stationKey == stationKey and
            tracked.slotIndex == slotIndex then
             playerSlots[playerId] = nil
+            print(('[free-restaurants] Cleared playerSlots[%d] - player can now craft elsewhere'):format(playerId))
+        else
+            print(('[free-restaurants] playerSlots NOT cleared - tracked slot does not match'))
         end
+    else
+        print(('[free-restaurants] playerSlots[%d] was already nil'):format(playerId))
     end
 
     -- Clear the cooking timeout since crafting is complete
