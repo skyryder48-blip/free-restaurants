@@ -18,6 +18,7 @@ print('[free-restaurants] server/crafting.lua loading...')
 
 -- Forward declarations for functions used before definition
 local calculateLevel
+local getPendingItemKey
 
 -- ============================================================================
 -- PENDING STATION ITEMS
@@ -687,7 +688,7 @@ end)
 ---@param stationKey string
 ---@param slotIndex number
 ---@return string
-local function getPendingItemKey(locationKey, stationKey, slotIndex)
+getPendingItemKey = function(locationKey, stationKey, slotIndex)
     return ('%s:%s:%d'):format(locationKey, stationKey, slotIndex)
 end
 
