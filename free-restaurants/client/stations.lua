@@ -1177,6 +1177,10 @@ end
 -- STATION INTERACTION
 -- ============================================================================
 
+-- Forward declarations for functions used before definition
+local openBatchCraftMenu
+local startBatchCookingAtStation
+
 --- Get count of available (empty) slots at a station
 ---@param locationKey string
 ---@param stationKey string
@@ -1318,7 +1322,7 @@ end
 ---@param stationData table
 ---@param stationTypeConfig table
 ---@param maxBatch number
-local function openBatchCraftMenu(locationKey, stationKey, recipe, stationData, stationTypeConfig, maxBatch)
+openBatchCraftMenu = function(locationKey, stationKey, recipe, stationData, stationTypeConfig, maxBatch)
     local input = lib.inputDialog(('Batch Craft: %s'):format(recipe.label), {
         {
             type = 'number',
@@ -1353,7 +1357,7 @@ end
 ---@param stationData table
 ---@param stationTypeConfig table
 ---@param amount number
-local function startBatchCookingAtStation(locationKey, stationKey, recipe, stationData, stationTypeConfig, amount)
+startBatchCookingAtStation = function(locationKey, stationKey, recipe, stationData, stationTypeConfig, amount)
     local fullStationKey = ('%s_%s'):format(locationKey, stationKey)
 
     -- Get available slots
