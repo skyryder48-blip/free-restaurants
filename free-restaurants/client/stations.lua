@@ -1118,7 +1118,27 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
             end,
         })
     end
-    
+
+    -- Add batch pickup option (appears when 2+ items are ready)
+    table.insert(targetOptions, {
+        name = ('%s_batch_pickup'):format(fullStationKey),
+        label = 'Pick Up Multiple Items',
+        icon = 'fa-solid fa-boxes-stacked',
+        canInteract = function()
+            -- Check if on duty
+            if not FreeRestaurants.Client.IsOnDuty() then
+                return false
+            end
+
+            -- Count pending pickups at this station
+            local _, count = getPendingPickupsAtStation(locationKey, stationKey)
+            return count >= 2
+        end,
+        onSelect = function()
+            openBatchPickupDialog(locationKey, stationKey)
+        end,
+    })
+
     -- Add view HUD option (always available when on duty)
     table.insert(targetOptions, {
         name = ('%s_view_hud'):format(fullStationKey),
@@ -1632,6 +1652,106 @@ pickupItemFromStation = function(pendingKey)
     end
 end
 
+--- Get all pending pickups at a station
+---@param locationKey string Location identifier
+---@param stationKey string Station identifier
+---@return table pendingItems Array of pending pickup data
+---@return number count Number of pending items
+local function getPendingPickupsAtStation(locationKey, stationKey)
+    local pendingItems = {}
+    local stationPrefix = ('%s_%s_'):format(locationKey, stationKey)
+
+    for pendingKey, pending in pairs(pendingPickups) do
+        if pendingKey:sub(1, #stationPrefix) == stationPrefix then
+            table.insert(pendingItems, {
+                key = pendingKey,
+                data = pending,
+            })
+        end
+    end
+
+    -- Sort by slot index for consistent ordering
+    table.sort(pendingItems, function(a, b)
+        return a.data.slotIndex < b.data.slotIndex
+    end)
+
+    return pendingItems, #pendingItems
+end
+
+--- Open batch pickup dialog and pick up selected quantity
+---@param locationKey string Location identifier
+---@param stationKey string Station identifier
+local function openBatchPickupDialog(locationKey, stationKey)
+    local pendingItems, count = getPendingPickupsAtStation(locationKey, stationKey)
+
+    if count == 0 then
+        lib.notify({
+            title = 'Nothing to Pick Up',
+            description = 'No items ready at this station.',
+            type = 'error',
+        })
+        return
+    end
+
+    -- If only one item, just pick it up directly
+    if count == 1 then
+        pickupItemFromStation(pendingItems[1].key)
+        return
+    end
+
+    -- Show input dialog for quantity selection
+    local firstItem = pendingItems[1].data
+    local input = lib.inputDialog(('Pick Up Items: %s'):format(firstItem.recipeLabel or 'Items'), {
+        {
+            type = 'number',
+            label = 'Amount to Pick Up',
+            description = ('%d items ready at this station'):format(count),
+            default = count,
+            min = 1,
+            max = count,
+        },
+    })
+
+    if not input then return end
+
+    local amountToPickup = math.min(input[1], count)
+    if amountToPickup < 1 then return end
+
+    -- Pick up the selected number of items
+    local pickedUp = 0
+    local failedCount = 0
+
+    for i = 1, amountToPickup do
+        if pendingItems[i] then
+            local success = pickupItemFromStation(pendingItems[i].key)
+            if success then
+                pickedUp = pickedUp + 1
+            else
+                failedCount = failedCount + 1
+            end
+            -- Small delay between pickups to prevent race conditions
+            if i < amountToPickup then
+                Wait(100)
+            end
+        end
+    end
+
+    -- Show summary notification
+    if failedCount > 0 then
+        lib.notify({
+            title = 'Partial Pickup',
+            description = ('Collected %d/%d items. %d failed.'):format(pickedUp, amountToPickup, failedCount),
+            type = 'warning',
+        })
+    elseif pickedUp > 1 then
+        lib.notify({
+            title = 'Batch Pickup Complete',
+            description = ('Collected %d items'):format(pickedUp),
+            type = 'success',
+        })
+    end
+end
+
 --- Handle item burn or spill when timer expires
 ---@param pendingKey string The pending pickup key
 handleItemBurnOrSpill = function(pendingKey)
@@ -2099,6 +2219,8 @@ exports('PickupItemFromStation', function(locationKey, stationKey, slotIndex)
     local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
     return pickupItemFromStation(pendingKey)
 end)
+exports('GetPendingPickupsAtStation', getPendingPickupsAtStation)
+exports('OpenBatchPickupDialog', openBatchPickupDialog)
 
 -- ============================================================================
 -- SERVER SYNC EVENT HANDLERS

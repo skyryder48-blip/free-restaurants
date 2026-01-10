@@ -579,30 +579,58 @@ lib.callback.register('free-restaurants:server:completeBatchCraftMultiSlot', fun
         itemQuality = calculateItemQuality(1.0, avgFreshness or 100)
     end
 
-    -- Mark slots as ready for pickup (don't give items directly)
-    -- Items will be given when player picks up from slot
+    -- Get result item info
     local resultItem = type(recipe.result) == 'table' and recipe.result.item or recipe.result
-    local resultAmount = type(recipe.result) == 'table' and recipe.result.count or 1
+    local resultAmount = type(recipe.result) == 'table' and (recipe.result.count or recipe.result.amount) or 1
 
-    -- Store pending items at each slot
+    -- Build metadata
+    local metadata = {
+        quality = itemQuality,
+        craftedAt = os.time(),
+        craftedBy = player.PlayerData.citizenid,
+    }
+
+    -- Add freshness for food items
+    if recipe.category == 'food' or recipe.isFoodItem then
+        metadata.freshness = itemQuality
+        metadata.decayRate = recipe.decayRate or 1.0
+    end
+
+    -- Apply quality tier label
+    local qualityLabel, qualityTier = getQualityInfo(itemQuality)
+    metadata.qualityLabel = qualityLabel
+    metadata.qualityTier = qualityTier
+
+    -- Store pending items at each slot for pickup
     local fullStationKey = ('%s_%s'):format(locationKey, stationKey)
 
     for i, slotIndex in ipairs(claimedSlots) do
-        -- Mark slot as having a ready item (stored in server state for pickup)
-        local slotKey = ('%s_slot%d'):format(fullStationKey, slotIndex)
-
-        -- Store pending pickup info (this would typically be in stationSlots state)
-        TriggerClientEvent('free-restaurants:client:slotReadyForPickup', -1, {
+        -- Store in pendingStationItems for server-side pickup
+        local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+        pendingStationItems[pendingKey] = {
+            recipeId = recipeId,
+            itemName = resultItem,
+            amount = resultAmount,
+            metadata = metadata,
+            quality = itemQuality,
+            craftedBy = source,
+            craftedByName = player.PlayerData.charinfo.firstname .. ' ' .. player.PlayerData.charinfo.lastname,
+            craftedAt = os.time(),
             locationKey = locationKey,
             stationKey = stationKey,
             slotIndex = slotIndex,
-            recipeId = recipeId,
-            item = resultItem,
-            amount = resultAmount,
-            quality = itemQuality,
-            craftedBy = player.PlayerData.citizenid,
-            craftedByName = player.PlayerData.charinfo.firstname .. ' ' .. player.PlayerData.charinfo.lastname,
-        })
+            recipe = recipe,
+            isBatchItem = true,
+            batchIndex = i,
+            batchTotal = amount,
+        }
+
+        -- Mark slot as ready for pickup
+        exports['free-restaurants']:MarkSlotForPickup(source, locationKey, stationKey, slotIndex)
+
+        print(('[free-restaurants] Stored batch item %d/%d at %s slot %d'):format(
+            i, amount, fullStationKey, slotIndex
+        ))
     end
 
     -- Award XP (reduced for batch)
