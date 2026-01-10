@@ -1577,17 +1577,40 @@ RegisterNetEvent('free-restaurants:client:startBatchCrafting', function(recipeId
                 type = 'success',
             })
 
-            -- Update all slot props to cooked state
-            local fullStationKey = ('%s_%s'):format(stationData.locationKey, stationData.stationKey)
-            for _, slotIndex in ipairs(claimedSlots) do
+            -- Get station type config for pickup settings
+            local stationType = stationData.stationData and stationData.stationData.type or 'prep_counter'
+            local stationTypeConfig = Config.Stations.Types[stationType]
+            local pickupConfig = stationTypeConfig and stationTypeConfig.pickup
+
+            -- Trigger cookingComplete for EACH slot to register them for pickup
+            for i, slotIndex in ipairs(claimedSlots) do
+                -- First update the cooking state (visual prop updates)
                 TriggerEvent('free-restaurants:client:cookingStateUpdate', {
                     locationKey = stationData.locationKey,
                     stationKey = stationData.stationKey,
                     slotIndex = slotIndex,
-                    stationType = stationData.stationData and stationData.stationData.type or 'grill',
+                    stationType = stationType,
                     status = 'ready',
                     progress = 100,
                     quality = math.floor((finalQuality or 1.0) * 100),
+                })
+
+                -- Then trigger cookingComplete with ready_for_pickup status
+                -- This registers the item in pendingPickups for pickup
+                TriggerEvent('free-restaurants:client:cookingComplete', {
+                    locationKey = stationData.locationKey,
+                    stationKey = stationData.stationKey,
+                    slotIndex = slotIndex,
+                    slotCoords = stationData.slotCoords, -- May be primary slot coords, but that's OK
+                    stationType = stationType,
+                    status = 'ready_for_pickup',
+                    recipeId = recipeId,
+                    recipeLabel = recipeData.label,
+                    quality = finalQuality or 1.0,
+                    pickupConfig = pickupConfig,
+                    isBatchItem = true,
+                    batchIndex = i,
+                    batchTotal = amount,
                 })
             end
         else
