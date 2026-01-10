@@ -45,6 +45,8 @@ local pendingPickups = {}
 local startPickupTimer
 local handleItemBurnOrSpill
 local pickupItemFromStation
+local getPendingPickupsAtStation
+local openBatchPickupDialog
 
 -- Forward declarations for functions used before definition
 local hideStationHUD
@@ -1657,7 +1659,7 @@ end
 ---@param stationKey string Station identifier
 ---@return table pendingItems Array of pending pickup data
 ---@return number count Number of pending items
-local function getPendingPickupsAtStation(locationKey, stationKey)
+getPendingPickupsAtStation = function(locationKey, stationKey)
     local pendingItems = {}
     local stationPrefix = ('%s_%s_'):format(locationKey, stationKey)
 
@@ -1681,7 +1683,7 @@ end
 --- Open batch pickup dialog and pick up selected quantity
 ---@param locationKey string Location identifier
 ---@param stationKey string Station identifier
-local function openBatchPickupDialog(locationKey, stationKey)
+openBatchPickupDialog = function(locationKey, stationKey)
     local pendingItems, count = getPendingPickupsAtStation(locationKey, stationKey)
 
     if count == 0 then
