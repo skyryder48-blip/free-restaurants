@@ -30,6 +30,7 @@ shared_scripts {
     'config/locations.lua',
     'config/item_effects.lua',
     'config/sushi_restaurant.lua',
+    'config/ordering.lua',
 }
 
 -- Client scripts
@@ -39,6 +40,7 @@ client_scripts {
     'client/stations.lua',
     'client/cooking.lua',
     'client/orders.lua',
+    'client/ordering.lua',
     'client/customers.lua',
     'client/management.lua',
     'client/delivery.lua',
@@ -76,6 +78,8 @@ files {
     'ui/**/*.html',
     'ui/**/*.js',
     'ui/**/*.css',
+    'ui/kds/*.js',
+    'ui/kds/*.css',
     'lb-tablet-app/ui/**/*.html',
     'lb-tablet-app/ui/**/*.js',
     'lb-tablet-app/ui/**/*.css',
