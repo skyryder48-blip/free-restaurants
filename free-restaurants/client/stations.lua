@@ -2273,13 +2273,12 @@ end)
 local function requestCookingStateSync(locationKey)
     -- This will be called when a player enters a restaurant location
     -- Server can respond with all active cooking sessions for that location
-    lib.callback.await('free-restaurants:server:getLocationCookingStates', false, locationKey, function(states)
-        if not states then return end
+    local states = lib.callback.await('free-restaurants:server:getLocationCookingStates', false, locationKey)
+    if not states then return end
 
-        for _, state in ipairs(states) do
-            TriggerEvent('free-restaurants:client:syncCookingState', state)
-        end
-    end)
+    for _, state in ipairs(states) do
+        TriggerEvent('free-restaurants:client:syncCookingState', state)
+    end
 end
 
 -- Resource cleanup
