@@ -835,6 +835,7 @@ lib.callback.register('free-restaurants:server:pickupFromStation', function(sour
 end)
 
 --- Handle burn or spill event for item at station
+--- Items remain in slot with 0 durability - must be manually cleaned up
 lib.callback.register('free-restaurants:server:handleBurnOrSpill', function(source, locationKey, stationKey, slotIndex, isBurn)
     local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
     local pendingItem = pendingStationItems[pendingKey]
@@ -845,8 +846,6 @@ lib.callback.register('free-restaurants:server:handleBurnOrSpill', function(sour
 
     local stationType = nil
     -- Try to get station type from config
-    -- Location keys are formatted as "restaurant_sublocation" (e.g., "tacofarmer_pilsen")
-    -- Config is nested: Config.Locations['tacofarmer']['pilsen']
     local locationConfig = nil
 
     -- Try direct lookup first (flat structure)
@@ -864,51 +863,85 @@ lib.callback.register('free-restaurants:server:handleBurnOrSpill', function(sour
         stationType = locationConfig.stations[stationKey].type
     end
 
-    local stationTypeConfig = stationType and Config.Stations.Types[stationType]
-    local pickupConfig = stationTypeConfig and stationTypeConfig.pickup
-
-    local resultItem = nil
-    local resultAmount = 0
-
-    if isBurn then
-        -- Item burned - give burnt item if configured
-        if pickupConfig and pickupConfig.burntItem then
-            resultItem = pickupConfig.burntItem
-            resultAmount = 1
-        end
-        print(('[free-restaurants] Item %s burned at station %s slot %d'):format(
-            pendingItem.itemName, stationKey, slotIndex
-        ))
-    else
-        -- Item spilled - give spilled item if configured
-        if pickupConfig and pickupConfig.spilledItem then
-            resultItem = pickupConfig.spilledItem
-            resultAmount = 1
-        end
-        print(('[free-restaurants] Item %s spilled at station %s slot %d'):format(
-            pendingItem.itemName, stationKey, slotIndex
-        ))
-    end
-
-    -- Give replacement item if one is configured
-    if resultItem and resultAmount > 0 and source then
-        local player = exports.qbx_core:GetPlayer(source)
-        if player then
-            exports.ox_inventory:AddItem(source, resultItem, resultAmount)
-        end
-    end
-
-    -- Clear pending item (it's destroyed/burnt/spilled)
-    pendingStationItems[pendingKey] = nil
-
-    -- Release the slot so it can be used again
     local status = isBurn and 'burnt' or 'spilled'
-    exports['free-restaurants']:ReleaseSlot(0, locationKey, stationKey, slotIndex, status)
+
+    -- Mark the item as ruined but KEEP IT IN THE SLOT
+    -- Player must manually clean up/dispose of burnt/spilled items
+    pendingItem.quality = 0
+    pendingItem.durability = 0
+    pendingItem.status = status
+    pendingItem.ruinedAt = os.time()
+
+    -- Update metadata to reflect ruined state
+    pendingItem.metadata = pendingItem.metadata or {}
+    pendingItem.metadata.quality = 0
+    pendingItem.metadata.durability = 0
+    pendingItem.metadata.ruined = true
+    pendingItem.metadata.ruinedType = status
+    pendingItem.metadata.ruinedAt = os.time()
+
+    -- Update the slot status but keep it occupied
+    exports['free-restaurants']:UpdateSlot(0, locationKey, stationKey, slotIndex, {
+        status = status,
+        quality = 0,
+    })
+
+    print(('[free-restaurants] Item %s %s at station %s slot %d - remains in slot for cleanup'):format(
+        pendingItem.itemName, status, stationKey, slotIndex
+    ))
+
+    -- Broadcast the state change to clients
+    TriggerClientEvent('free-restaurants:client:syncCookingState', -1, {
+        locationKey = locationKey,
+        stationKey = stationKey,
+        slotIndex = slotIndex,
+        status = status,
+        progress = 100,
+        quality = 0,
+        recipeId = pendingItem.recipeId,
+        recipeLabel = pendingItem.recipe and pendingItem.recipe.label or 'Ruined Item',
+    })
 
     return true, {
         wasBurn = isBurn,
-        replacementItem = resultItem,
+        itemRemains = true, -- Item stays in slot
+        status = status,
     }
+end)
+
+--- Clean up a ruined (burnt/spilled) item from a station slot
+--- This is called when player manually disposes of the ruined item
+lib.callback.register('free-restaurants:server:cleanupRuinedItem', function(source, locationKey, stationKey, slotIndex)
+    local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+    local pendingItem = pendingStationItems[pendingKey]
+
+    if not pendingItem then
+        return false, 'No item at this station'
+    end
+
+    -- Check if item is actually ruined
+    if pendingItem.status ~= 'burnt' and pendingItem.status ~= 'spilled' then
+        return false, 'Item is not ruined'
+    end
+
+    -- Clear pending item
+    pendingStationItems[pendingKey] = nil
+
+    -- Release the slot
+    exports['free-restaurants']:ReleaseSlot(0, locationKey, stationKey, slotIndex, 'cleaned')
+
+    -- Broadcast cleanup to all clients
+    TriggerClientEvent('free-restaurants:client:slotPickedUp', -1, {
+        locationKey = locationKey,
+        stationKey = stationKey,
+        slotIndex = slotIndex,
+    })
+
+    print(('[free-restaurants] Ruined item cleaned up at station %s slot %d by player %d'):format(
+        stationKey, slotIndex, source
+    ))
+
+    return true
 end)
 
 --- Check if there's a pending item at a station slot
@@ -1280,6 +1313,231 @@ end)
 exports('ClearPendingStationItem', function(locationKey, stationKey, slotIndex)
     local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
     pendingStationItems[pendingKey] = nil
+end)
+
+-- ============================================================================
+-- FIRE MANAGEMENT & DISPATCH INTEGRATION
+-- ============================================================================
+
+-- Track active fires for dispatch integration
+local activeFires = {}
+
+-- Register fire started (called from client via server event)
+RegisterNetEvent('free-restaurants:server:fireStarted', function(data)
+    if not data then return end
+
+    local fireKey = ('%s_%d'):format(data.stationKey, data.slotIndex)
+    local source = source
+
+    activeFires[fireKey] = {
+        stationKey = data.stationKey,
+        slotIndex = data.slotIndex,
+        coords = data.coords,
+        stage = data.stage or 1,
+        fireConfig = data.fireConfig,
+        startTime = os.time(),
+        reportedBy = source,
+    }
+
+    -- Trigger dispatch notification for emergency services
+    TriggerEvent('free-restaurants:server:dispatchFireAlert', {
+        fireKey = fireKey,
+        coords = data.coords,
+        stationKey = data.stationKey,
+        slotIndex = data.slotIndex,
+        fireType = data.fireConfig and data.fireConfig.type or 'regular',
+        severity = data.stage or 1,
+    })
+
+    print(('[free-restaurants] Fire started: %s (type: %s)'):format(
+        fireKey, data.fireConfig and data.fireConfig.type or 'unknown'
+    ))
+end)
+
+-- Register fire extinguished
+RegisterNetEvent('free-restaurants:server:fireExtinguished', function(data)
+    if not data then return end
+
+    local fireKey = ('%s_%d'):format(data.stationKey, data.slotIndex)
+
+    if activeFires[fireKey] then
+        activeFires[fireKey] = nil
+
+        -- Notify dispatch that fire is out
+        TriggerEvent('free-restaurants:server:dispatchFireCleared', {
+            fireKey = fireKey,
+            stationKey = data.stationKey,
+            slotIndex = data.slotIndex,
+        })
+
+        print(('[free-restaurants] Fire extinguished: %s'):format(fireKey))
+    end
+end)
+
+-- ============================================================================
+-- DISPATCH EXPORTS (For integration with dispatch scripts)
+-- ============================================================================
+
+-- Get all active fires
+exports('GetActiveFires', function()
+    return activeFires
+end)
+
+-- Get fire count
+exports('GetActiveFireCount', function()
+    local count = 0
+    for _ in pairs(activeFires) do
+        count = count + 1
+    end
+    return count
+end)
+
+-- Get fire by key
+exports('GetFire', function(fireKey)
+    return activeFires[fireKey]
+end)
+
+-- Get fires near coordinates
+exports('GetFiresNearCoords', function(coords, radius)
+    radius = radius or 50.0
+    local nearbyFires = {}
+
+    for fireKey, fire in pairs(activeFires) do
+        if fire.coords then
+            local distance = #(vector3(coords.x, coords.y, coords.z) - vector3(fire.coords.x, fire.coords.y, fire.coords.z))
+            if distance <= radius then
+                nearbyFires[fireKey] = fire
+                nearbyFires[fireKey].distance = distance
+            end
+        end
+    end
+
+    return nearbyFires
+end)
+
+-- Notify dispatch of fire (can be called externally)
+exports('NotifyDispatchFire', function(fireKey, additionalData)
+    local fire = activeFires[fireKey]
+    if not fire then return false end
+
+    TriggerEvent('free-restaurants:server:dispatchFireAlert', {
+        fireKey = fireKey,
+        coords = fire.coords,
+        stationKey = fire.stationKey,
+        slotIndex = fire.slotIndex,
+        fireType = fire.fireConfig and fire.fireConfig.type or 'regular',
+        severity = fire.stage or 1,
+        additionalData = additionalData,
+    })
+
+    return true
+end)
+
+-- Clear fire by key (server-side, broadcasts to all clients)
+exports('ClearFire', function(fireKey)
+    local fire = activeFires[fireKey]
+    if not fire then return false end
+
+    -- Broadcast to all clients to stop the fire
+    TriggerClientEvent('free-restaurants:client:adminClearFire', -1, {
+        stationKey = fire.stationKey,
+        slotIndex = fire.slotIndex,
+    })
+
+    activeFires[fireKey] = nil
+    return true
+end)
+
+-- Clear all fires
+exports('ClearAllFires', function()
+    local count = 0
+    for fireKey, fire in pairs(activeFires) do
+        TriggerClientEvent('free-restaurants:client:adminClearFire', -1, {
+            stationKey = fire.stationKey,
+            slotIndex = fire.slotIndex,
+        })
+        count = count + 1
+    end
+    activeFires = {}
+    return count
+end)
+
+-- ============================================================================
+-- ADMIN COMMANDS
+-- ============================================================================
+
+-- Admin command to clear fires
+lib.addCommand('clearfires', {
+    help = 'Clear all restaurant fires (Admin only)',
+    params = {
+        { name = 'location', type = 'string', help = 'Location key (optional, leave blank for all)', optional = true },
+    },
+    restricted = 'group.admin',
+}, function(source, args)
+    local locationFilter = args.location
+
+    if locationFilter then
+        -- Clear fires at specific location
+        local count = 0
+        for fireKey, fire in pairs(activeFires) do
+            if fire.stationKey and fire.stationKey:find(locationFilter) then
+                TriggerClientEvent('free-restaurants:client:adminClearFire', -1, {
+                    stationKey = fire.stationKey,
+                    slotIndex = fire.slotIndex,
+                })
+                activeFires[fireKey] = nil
+                count = count + 1
+            end
+        end
+
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Fires Cleared',
+            description = ('Cleared %d fires at %s'):format(count, locationFilter),
+            type = 'success',
+        })
+    else
+        -- Clear all fires
+        local count = exports['free-restaurants']:ClearAllFires()
+
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'All Fires Cleared',
+            description = ('Cleared %d fires'):format(count),
+            type = 'success',
+        })
+    end
+end)
+
+-- Admin command to list active fires
+lib.addCommand('listfires', {
+    help = 'List all active restaurant fires (Admin only)',
+    restricted = 'group.admin',
+}, function(source, args)
+    local count = 0
+    local fireList = {}
+
+    for fireKey, fire in pairs(activeFires) do
+        count = count + 1
+        table.insert(fireList, ('%s (stage %d, %s)'):format(
+            fireKey,
+            fire.stage or 1,
+            fire.fireConfig and fire.fireConfig.type or 'regular'
+        ))
+    end
+
+    if count > 0 then
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Active Fires: ' .. count,
+            description = table.concat(fireList, '\n'),
+            type = 'warning',
+            duration = 10000,
+        })
+    else
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'No Active Fires',
+            description = 'All clear!',
+            type = 'success',
+        })
+    end
 end)
 
 print('[free-restaurants] server/crafting.lua loaded')
