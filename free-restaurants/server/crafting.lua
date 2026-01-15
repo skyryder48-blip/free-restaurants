@@ -1545,7 +1545,8 @@ end)
 -- ============================================================================
 
 --- Handle item consumption from client
---- Removes the item after player consumes it
+--- Updates item metadata to track remaining uses - item stays in inventory
+--- Player must manually dispose of depleted items
 RegisterNetEvent('free-restaurants:server:consumeItem', function(data)
     local source = source
     local player = exports.qbx_core:GetPlayer(source)
@@ -1565,28 +1566,129 @@ RegisterNetEvent('free-restaurants:server:consumeItem', function(data)
     local totalUses = data.totalUses or 1
     local partial = data.partial
 
-    -- For partial consumption, we could implement partial item durability
-    -- For now, if any uses were consumed, remove the whole item
     if usesConsumed > 0 then
-        local success = exports.ox_inventory:RemoveItem(source, itemName, 1, nil, slot)
+        -- Get current item to update metadata
+        local items = exports.ox_inventory:GetInventoryItems(source)
+        local item = items and items[slot]
 
-        if success then
-            print(('[free-restaurants] Player %s consumed %s (%d/%d uses)'):format(
-                player.PlayerData.citizenid, itemName, usesConsumed, totalUses
+        if item and item.name == itemName then
+            -- Calculate remaining uses
+            local currentUses = item.metadata and item.metadata.usesRemaining or totalUses
+            local remainingUses = math.max(0, currentUses - usesConsumed)
+
+            -- Update metadata instead of removing item
+            local newMetadata = item.metadata or {}
+            newMetadata.usesRemaining = remainingUses
+            newMetadata.totalUses = totalUses
+            newMetadata.lastConsumed = os.time()
+
+            -- Mark as depleted if no uses remain
+            if remainingUses <= 0 then
+                newMetadata.depleted = true
+                newMetadata.depletedAt = os.time()
+            end
+
+            -- Update item metadata
+            exports.ox_inventory:SetMetadata(source, slot, newMetadata)
+
+            print(('[free-restaurants] Player %s consumed %s (%d/%d uses, %d remaining)'):format(
+                player.PlayerData.citizenid, itemName, usesConsumed, totalUses, remainingUses
             ))
 
             TriggerClientEvent('free-restaurants:client:consumptionComplete', source, {
                 success = true,
                 itemName = itemName,
                 usesConsumed = usesConsumed,
+                remainingUses = remainingUses,
+                depleted = remainingUses <= 0,
                 partial = partial,
             })
         else
             TriggerClientEvent('free-restaurants:client:consumptionComplete', source, {
                 success = false,
-                error = 'Failed to remove item from inventory',
+                error = 'Item not found in slot',
             })
         end
+    end
+end)
+
+--- Dispose of a depleted/empty item (for recycling/RP)
+RegisterNetEvent('free-restaurants:server:disposeItem', function(data)
+    local source = source
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return end
+
+    if not data or not data.slot then
+        return
+    end
+
+    local items = exports.ox_inventory:GetInventoryItems(source)
+    local item = items and items[data.slot]
+
+    if not item then
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Error',
+            description = 'No item found',
+            type = 'error',
+        })
+        return
+    end
+
+    -- Check if item is depleted or ruined
+    local canDispose = false
+    local reason = ''
+
+    if item.metadata then
+        if item.metadata.depleted then
+            canDispose = true
+            reason = 'empty container'
+        elseif item.metadata.ruined then
+            canDispose = true
+            reason = 'ruined item'
+        elseif item.metadata.spoiled then
+            canDispose = true
+            reason = 'spoiled food'
+        elseif item.metadata.usesRemaining and item.metadata.usesRemaining <= 0 then
+            canDispose = true
+            reason = 'empty item'
+        end
+    end
+
+    -- Also allow disposal of any food item (for RP purposes)
+    if data.force and Config.ItemEffects and Config.ItemEffects.Items[item.name] then
+        canDispose = true
+        reason = 'discarded'
+    end
+
+    if canDispose then
+        local removed = exports.ox_inventory:RemoveItem(source, item.name, 1, nil, data.slot)
+
+        if removed then
+            print(('[free-restaurants] Player %s disposed of %s (%s)'):format(
+                player.PlayerData.citizenid, item.name, reason
+            ))
+
+            TriggerClientEvent('ox_lib:notify', source, {
+                title = 'Disposed',
+                description = ('Disposed of %s (%s)'):format(item.label or item.name, reason),
+                type = 'success',
+            })
+
+            -- Could add recycling rewards here
+            -- e.g., give small money back for returning containers
+        else
+            TriggerClientEvent('ox_lib:notify', source, {
+                title = 'Error',
+                description = 'Failed to dispose item',
+                type = 'error',
+            })
+        end
+    else
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Cannot Dispose',
+            description = 'This item still has uses remaining',
+            type = 'warning',
+        })
     end
 end)
 

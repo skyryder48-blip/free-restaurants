@@ -236,11 +236,52 @@ local function startConsumption(itemName, itemData)
     local quality = itemData.metadata and itemData.metadata.quality or 75
     local durability = itemData.metadata and itemData.metadata.durability or 100
 
+    -- Check if item is depleted (already consumed all uses)
+    if itemData.metadata and itemData.metadata.depleted then
+        lib.notify({
+            title = 'Empty',
+            description = 'This item is empty. Dispose of it at a trash bin.',
+            type = 'warning',
+        })
+        return false
+    end
+
+    -- Get remaining uses from metadata (for partially consumed items)
+    local remainingUses = itemData.metadata and itemData.metadata.usesRemaining
+    local totalUses = itemConfig.uses or 1
+    if not remainingUses then
+        remainingUses = totalUses
+    end
+
+    -- Check if item has any uses left
+    if remainingUses <= 0 then
+        lib.notify({
+            title = 'Empty',
+            description = 'This item has no uses remaining. Dispose of it.',
+            type = 'warning',
+        })
+        return false
+    end
+
     -- Check if item is ruined
     if quality <= 0 or durability <= 0 then
         local confirm = lib.alertDialog({
             header = 'Ruined Item',
             content = 'This item is ruined and may make you sick. Consume anyway?',
+            centered = true,
+            cancel = true,
+        })
+
+        if confirm ~= 'confirm' then
+            return false
+        end
+    end
+
+    -- Check if item is spoiled
+    if itemData.metadata and itemData.metadata.spoiled then
+        local confirm = lib.alertDialog({
+            header = 'Spoiled Food',
+            content = 'This food has spoiled and may make you sick. Consume anyway?',
             centered = true,
             cancel = true,
         })
@@ -257,7 +298,8 @@ local function startConsumption(itemName, itemData)
         itemConfig = itemConfig,
         quality = quality,
         currentUse = 0,
-        totalUses = itemConfig.uses or 1,
+        totalUses = totalUses,
+        remainingUses = remainingUses,
         slot = itemData.slot,
     }
 
@@ -313,8 +355,9 @@ function consumeUse()
         applyImmediateEffects(config.effects, quality, currentConsumption.currentUse, currentConsumption.totalUses)
     end
 
-    -- Check if more uses remain
-    if currentConsumption.currentUse < currentConsumption.totalUses then
+    -- Check if more uses remain (use remainingUses for partially consumed items)
+    local usesLeft = currentConsumption.remainingUses - currentConsumption.currentUse
+    if usesLeft > 0 then
         -- Prompt to continue
         promptContinueConsumption()
     else
@@ -328,12 +371,12 @@ function promptContinueConsumption()
     if not currentConsumption then return end
 
     local config = currentConsumption.itemConfig
-    local remainingUses = currentConsumption.totalUses - currentConsumption.currentUse
+    local usesLeft = currentConsumption.remainingUses - currentConsumption.currentUse
 
     -- Show prompt
     lib.showTextUI(('[E] Continue %s (%d more)  [X] Stop'):format(
         config.type == 'drink' and 'drinking' or 'eating',
-        remainingUses
+        usesLeft
     ), {
         position = 'bottom-center',
         icon = config.type == 'drink' and 'fa-solid fa-glass-water' or 'fa-solid fa-utensils',
@@ -385,6 +428,7 @@ function finishConsumption(success, partial)
     local config = currentConsumption.itemConfig
     local quality = currentConsumption.quality
     local usesConsumed = currentConsumption.currentUse
+    local usesLeft = currentConsumption.remainingUses - usesConsumed
 
     -- Stop animation
     stopConsumptionAnim()
@@ -396,34 +440,34 @@ function finishConsumption(success, partial)
     end
 
     if success and usesConsumed > 0 then
-        -- Apply temporary effects (only on completion)
-        if config.temporary and not partial then
+        -- Apply temporary effects (only on full completion of item)
+        if config.temporary and usesLeft <= 0 then
             applyTemporaryEffects(config.temporary, quality)
         end
 
-        -- Remove item from inventory
+        -- Update item metadata (item stays in inventory)
         TriggerServerEvent('free-restaurants:server:consumeItem', {
             itemName = currentConsumption.itemName,
             slot = currentConsumption.slot,
             usesConsumed = usesConsumed,
             totalUses = currentConsumption.totalUses,
-            partial = partial,
+            partial = partial or usesLeft > 0,
         })
 
         -- Show completion notification
         local qualityLabel = Config.ItemEffects.GetQualityLabel(quality)
-        if partial then
+        if usesLeft > 0 then
             lib.notify({
                 title = 'Partially Consumed',
-                description = ('Consumed %d/%d uses of %s (%s quality)'):format(
-                    usesConsumed, currentConsumption.totalUses, config.label, qualityLabel
+                description = ('Consumed %d uses of %s (%d remaining)'):format(
+                    usesConsumed, config.label, usesLeft
                 ),
                 type = 'inform',
             })
         else
             lib.notify({
                 title = config.type == 'drink' and 'Drink Finished' or 'Meal Finished',
-                description = ('Finished %s (%s quality)'):format(config.label, qualityLabel),
+                description = ('Finished %s (%s quality) - dispose of container'):format(config.label, qualityLabel),
                 type = 'success',
             })
         end
@@ -473,6 +517,48 @@ RegisterNetEvent('free-restaurants:client:consumptionComplete', function(data)
 end)
 
 -- ============================================================================
+-- DISPOSAL SYSTEM
+-- ============================================================================
+
+--- Dispose of an item (for empty containers, spoiled food, etc.)
+---@param slot number Inventory slot
+---@param force boolean Force disposal even if item has uses
+local function disposeItem(slot, force)
+    TriggerServerEvent('free-restaurants:server:disposeItem', {
+        slot = slot,
+        force = force or false,
+    })
+end
+
+--- Check if item can be disposed
+---@param itemData table Item data from inventory
+---@return boolean canDispose
+---@return string reason
+local function canDisposeItem(itemData)
+    if not itemData or not itemData.metadata then
+        return false, 'Invalid item'
+    end
+
+    if itemData.metadata.depleted then
+        return true, 'Empty container'
+    end
+
+    if itemData.metadata.ruined then
+        return true, 'Ruined item'
+    end
+
+    if itemData.metadata.spoiled then
+        return true, 'Spoiled food'
+    end
+
+    if itemData.metadata.usesRemaining and itemData.metadata.usesRemaining <= 0 then
+        return true, 'Empty item'
+    end
+
+    return false, 'Item still has uses'
+end
+
+-- ============================================================================
 -- EXPORTS
 -- ============================================================================
 
@@ -486,6 +572,8 @@ exports('CancelConsumption', function()
     end
     return false
 end)
+exports('DisposeItem', disposeItem)
+exports('CanDisposeItem', canDisposeItem)
 
 -- ============================================================================
 -- GLOBAL TABLE
@@ -501,6 +589,8 @@ FreeRestaurants.Consumption = {
         end
         return false
     end,
+    Dispose = disposeItem,
+    CanDispose = canDisposeItem,
 }
 
 -- ============================================================================
