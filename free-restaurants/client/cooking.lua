@@ -242,15 +242,13 @@ local function startCrafting(recipeId, recipeData, stationData)
         return
     end
 
-    local batchSize = stationData.batchAmount or 1
     local stationType = stationData.stationData and stationData.stationData.type or 'grill'
 
-    -- Step 1: Consume ingredients on server
+    -- Step 1: Consume ingredients on server (single item)
     local consumeSuccess, avgFreshness = lib.callback.await(
         'free-restaurants:server:consumeIngredients',
         false,
-        recipeId,
-        batchSize
+        recipeId
     )
 
     if not consumeSuccess then
@@ -263,15 +261,15 @@ local function startCrafting(recipeId, recipeData, stationData)
     end
 
     -- Step 2: Run the skill check (player must pass this before cooking starts)
-    local skillPassed, quality = executeSkillCheck(recipeData, stationType, batchSize)
+    -- For single items, batchSize is always 1
+    local skillPassed, quality = executeSkillCheck(recipeData, stationType, 1)
 
     if not skillPassed then
         -- Return ingredients on failure
         lib.callback.await(
             'free-restaurants:server:returnIngredients',
             false,
-            recipeId,
-            batchSize
+            recipeId
         )
 
         -- Release the slot
@@ -296,7 +294,7 @@ local function startCrafting(recipeId, recipeData, stationData)
             slotIndex = stationData.slotIndex,
             quality = quality,
             avgFreshness = avgFreshness,
-            batchSize = batchSize,
+            batchSize = 1,
             craftTime = recipeData.craftTime or 10000,
         }
     )
@@ -315,7 +313,7 @@ local function startCrafting(recipeId, recipeData, stationData)
             type = 'error',
         })
         -- Return ingredients
-        lib.callback.await('free-restaurants:server:returnIngredients', false, recipeId, batchSize)
+        lib.callback.await('free-restaurants:server:returnIngredients', false, recipeId)
     end
 end
 
