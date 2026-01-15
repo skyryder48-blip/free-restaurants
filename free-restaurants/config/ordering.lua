@@ -9,6 +9,8 @@
     - Receipt configuration
 ]]
 
+print('[free-restaurants] Loading config/ordering.lua...')
+
 Config = Config or {}
 Config.Ordering = Config.Ordering or {}
 
@@ -721,4 +723,4 @@ function Config.GetPickupCounter(jobName, locationKey)
     return orderingConfig.pickupCounter
 end
 
-return Config
+print('[free-restaurants] config/ordering.lua loaded successfully')

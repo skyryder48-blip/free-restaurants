@@ -15,6 +15,8 @@
     - ox_target (interaction zones)
 ]]
 
+print('[free-restaurants] Loading client/ordering.lua...')
+
 -- ============================================================================
 -- LOCAL STATE
 -- ============================================================================
@@ -25,6 +27,14 @@ local kdsVisible = false                -- KDS overlay visibility
 local kioskVisible = false              -- Kiosk overlay visibility
 local currentLocation = nil             -- Current location key
 local currentJob = nil                  -- Current job name
+
+-- Forward declarations for functions that reference each other
+local openKiosk, closeKiosk
+local openRegister
+local showQuickOrderMenu, showQuickOrderCategory, quickAddItem
+local openKDS, closeKDS
+local setupOrderingTargets, initializeTargets
+local checkOrderPickup
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -81,7 +91,7 @@ end
 --- Open kiosk ordering interface
 ---@param locationKey string
 ---@param locationData table
-local function openKiosk(locationKey, locationData)
+openKiosk = function(locationKey, locationData)
     if kioskVisible then return end
 
     currentLocation = locationKey
@@ -104,7 +114,7 @@ local function openKiosk(locationKey, locationData)
 end
 
 --- Close kiosk interface
-local function closeKiosk()
+closeKiosk = function()
     if not kioskVisible then return end
 
     kioskVisible = false
@@ -196,7 +206,7 @@ end)
 --- Open register ordering interface for employee
 ---@param locationKey string
 ---@param locationData table
-local function openRegister(locationKey, locationData)
+openRegister = function(locationKey, locationData)
     -- Check if on duty
     local PlayerData = exports.qbx_core:GetPlayerData()
     if not PlayerData.job.onduty then
@@ -253,7 +263,7 @@ end
 ---@param locationData table
 ---@param menu table
 ---@param categories table
-local function showQuickOrderMenu(locationKey, locationData, menu, categories)
+showQuickOrderMenu = function(locationKey, locationData, menu, categories)
     local options = {}
 
     for _, category in ipairs(categories) do
@@ -281,7 +291,7 @@ end
 ---@param locationData table
 ---@param menu table
 ---@param category string
-local function showQuickOrderCategory(locationKey, locationData, menu, category)
+showQuickOrderCategory = function(locationKey, locationData, menu, category)
     local options = {}
 
     for _, item in ipairs(menu) do
@@ -310,7 +320,7 @@ end
 --- Quick add item (employee enters customer payment)
 ---@param locationKey string
 ---@param item table
-local function quickAddItem(locationKey, item)
+quickAddItem = function(locationKey, item)
     local input = lib.inputDialog('Quick Order', {
         { type = 'number', label = 'Quantity', default = 1, min = 1, max = 10 },
         { type = 'select', label = 'Payment Method', options = {
@@ -356,7 +366,7 @@ end
 --- Open KDS overlay
 ---@param locationKey string
 ---@param locationData table
-local function openKDS(locationKey, locationData)
+openKDS = function(locationKey, locationData)
     if kdsVisible then return end
 
     local PlayerData = exports.qbx_core:GetPlayerData()
@@ -390,7 +400,7 @@ local function openKDS(locationKey, locationData)
 end
 
 --- Close KDS overlay
-local function closeKDS()
+closeKDS = function()
     if not kdsVisible then return end
 
     kdsVisible = false
@@ -480,7 +490,7 @@ end)
 -- ============================================================================
 
 --- Setup ordering interaction targets
-local function setupOrderingTargets()
+setupOrderingTargets = function()
     local totalKiosks = 0
     local totalRegisters = 0
     local totalKDS = 0
@@ -640,7 +650,7 @@ end
 
 --- Check if player has a ready order to pickup
 ---@param locationKey string
-local function checkOrderPickup(locationKey)
+checkOrderPickup = function(locationKey)
     local myOrder = lib.callback.await('free-restaurants:server:getMyOrder', false)
 
     if not myOrder then
@@ -750,7 +760,7 @@ lib.addKeybind({
 local targetsInitialized = false
 
 --- Initialize targets (called once)
-local function initializeTargets()
+initializeTargets = function()
     if targetsInitialized then return end
     targetsInitialized = true
 
@@ -815,3 +825,4 @@ exports('IsKDSVisible', function() return kdsVisible end)
 exports('IsKioskVisible', function() return kioskVisible end)
 
 FreeRestaurants.Utils.Debug('client/ordering.lua loaded')
+print('[free-restaurants] client/ordering.lua loaded successfully')
