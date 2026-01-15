@@ -481,19 +481,39 @@ end)
 
 --- Setup ordering interaction targets
 local function setupOrderingTargets()
+    local totalKiosks = 0
+    local totalRegisters = 0
+    local totalKDS = 0
+
+    -- Check if Config.Ordering exists
+    if not Config.Ordering then
+        print('[free-restaurants] ERROR: Config.Ordering is nil!')
+        return
+    end
+
     for restaurantType, locations in pairs(Config.Locations) do
         if type(locations) == 'table' and restaurantType ~= 'Settings' then
             for locationId, locationData in pairs(locations) do
                 if type(locationData) == 'table' and locationData.enabled then
                     local key = ('%s_%s'):format(restaurantType, locationId)
-                    local orderingConfig = Config.GetOrderingConfig and Config.GetOrderingConfig(restaurantType, locationId)
+
+                    -- Try to get ordering config - check both by restaurantType and by job name
+                    local orderingConfig = nil
+                    if Config.Ordering[restaurantType] and Config.Ordering[restaurantType][locationId] then
+                        orderingConfig = Config.Ordering[restaurantType][locationId]
+                    elseif locationData.job and Config.Ordering[locationData.job] and Config.Ordering[locationData.job][locationId] then
+                        orderingConfig = Config.Ordering[locationData.job][locationId]
+                    end
 
                     if orderingConfig then
+                        print(('[free-restaurants] Setting up ordering for %s'):format(key))
+
                         -- Setup kiosks
                         if orderingConfig.kiosks then
                             for kioskId, kioskData in pairs(orderingConfig.kiosks) do
                                 if kioskData.enabled then
                                     local targetName = ('%s_kiosk_%s'):format(key, kioskId)
+                                    totalKiosks = totalKiosks + 1
 
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
@@ -512,6 +532,8 @@ local function setupOrderingTargets()
                                             },
                                         },
                                     })
+
+                                    print(('[free-restaurants]   + Kiosk: %s at %s'):format(kioskId, kioskData.coords))
                                 end
                             end
                         end
@@ -522,6 +544,7 @@ local function setupOrderingTargets()
                                 if registerData.enabled then
                                     local targetName = ('%s_register_%s'):format(key, registerId)
                                     local job = locationData.job
+                                    totalRegisters = totalRegisters + 1
 
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
@@ -541,6 +564,8 @@ local function setupOrderingTargets()
                                             },
                                         },
                                     })
+
+                                    print(('[free-restaurants]   + Register: %s (job: %s) at %s'):format(registerId, job or 'any', registerData.coords))
                                 end
                             end
                         end
@@ -551,6 +576,7 @@ local function setupOrderingTargets()
                                 if kdsData.enabled then
                                     local targetName = ('%s_kds_%s'):format(key, kdsId)
                                     local job = locationData.job
+                                    totalKDS = totalKDS + 1
 
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
@@ -596,12 +622,20 @@ local function setupOrderingTargets()
                                     },
                                 },
                             })
+
+                            print(('[free-restaurants]   + Pickup counter at %s'):format(pickupData.coords))
                         end
+                    else
+                        print(('[free-restaurants] No ordering config found for %s'):format(key))
                     end
                 end
             end
         end
     end
+
+    print(('[free-restaurants] Total targets created: %d kiosks, %d registers, %d KDS monitors'):format(
+        totalKiosks, totalRegisters, totalKDS
+    ))
 end
 
 --- Check if player has a ready order to pickup
@@ -713,9 +747,50 @@ lib.addKeybind({
 -- INITIALIZATION
 -- ============================================================================
 
+local targetsInitialized = false
+
+--- Initialize targets (called once)
+local function initializeTargets()
+    if targetsInitialized then return end
+    targetsInitialized = true
+
+    print('[free-restaurants] Initializing ordering targets...')
+    setupOrderingTargets()
+    print('[free-restaurants] Ordering targets initialized')
+end
+
 --- Initialize on resource start
 RegisterNetEvent('free-restaurants:client:ready', function()
-    setupOrderingTargets()
+    initializeTargets()
+end)
+
+--- Fallback initialization if ready event doesn't fire
+CreateThread(function()
+    -- Wait for player to be loaded
+    while not LocalPlayer.state.isLoggedIn do
+        Wait(500)
+    end
+
+    -- Give a moment for other systems to initialize
+    Wait(2000)
+
+    -- Initialize targets if not already done
+    if not targetsInitialized then
+        print('[free-restaurants] Fallback initialization of ordering targets')
+        initializeTargets()
+    end
+end)
+
+--- Also initialize on resource start for the current resource
+AddEventHandler('onClientResourceStart', function(resourceName)
+    if resourceName == GetCurrentResourceName() then
+        CreateThread(function()
+            Wait(1000)
+            if not targetsInitialized then
+                initializeTargets()
+            end
+        end)
+    end
 end)
 
 --- Cleanup on resource stop
