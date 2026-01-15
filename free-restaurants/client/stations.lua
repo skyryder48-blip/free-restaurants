@@ -2342,6 +2342,34 @@ RegisterNetEvent('free-restaurants:client:cookingFinished', function(data)
     PlaySoundFrontend(-1, 'PICK_UP_MONEY', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
 end)
 
+-- Handle slot pickup broadcast (sent to ALL clients when any player picks up)
+RegisterNetEvent('free-restaurants:client:slotPickedUp', function(data)
+    if not data then return end
+
+    local fullStationKey = ('%s_%s'):format(data.locationKey, data.stationKey)
+    local pendingKey = ('%s_%s_%d'):format(data.locationKey, data.stationKey, data.slotIndex)
+
+    -- Clear pending pickup for this slot (stops any running timers from firing)
+    if pendingPickups[pendingKey] then
+        pendingPickups[pendingKey] = nil
+        print(('[free-restaurants] Cleared pending pickup: %s (picked up by another player)'):format(pendingKey))
+    end
+
+    -- Clean up props and particles for this slot
+    cleanupSlot(fullStationKey, data.slotIndex)
+
+    -- Update local slot state to empty
+    if stationSlots[fullStationKey] and stationSlots[fullStationKey][data.slotIndex] then
+        stationSlots[fullStationKey][data.slotIndex] = {
+            status = 'empty',
+            occupied = false,
+            progress = 0,
+        }
+    end
+
+    FreeRestaurants.Utils.Debug(('[slotPickedUp] %s slot %d cleared'):format(fullStationKey, data.slotIndex))
+end)
+
 -- Request cooking state sync for a location when entering
 local function requestCookingStateSync(locationKey)
     -- This will be called when a player enters a restaurant location

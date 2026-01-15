@@ -815,6 +815,13 @@ lib.callback.register('free-restaurants:server:pickupFromStation', function(sour
     -- Use playerId 0 for forced release since the original crafter may have disconnected
     exports['free-restaurants']:ReleaseSlot(0, locationKey, stationKey, slotIndex, 'completed')
 
+    -- Broadcast to ALL clients to clear their pending pickups and cleanup for this slot
+    TriggerClientEvent('free-restaurants:client:slotPickedUp', -1, {
+        locationKey = locationKey,
+        stationKey = stationKey,
+        slotIndex = slotIndex,
+    })
+
     print(('[free-restaurants] Player %s picked up %s from station %s slot %d'):format(
         player.PlayerData.citizenid, pendingItem.itemName, stationKey, slotIndex
     ))
