@@ -28,6 +28,7 @@ shared_scripts {
     'config/station_types.lua',
     'config/recipes.lua',
     'config/locations.lua',
+    'config/item_effects.lua',
 }
 
 -- Client scripts
@@ -44,6 +45,7 @@ client_scripts {
     'client/tablet.lua',
     'client/npc-customers.lua',
     'client/cleaning.lua',
+    'client/consumption.lua',
 }
 
 -- Server scripts

@@ -1540,4 +1540,62 @@ lib.addCommand('listfires', {
     end
 end)
 
+-- ============================================================================
+-- CONSUMPTION SYSTEM
+-- ============================================================================
+
+--- Handle item consumption from client
+--- Removes the item after player consumes it
+RegisterNetEvent('free-restaurants:server:consumeItem', function(data)
+    local source = source
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return end
+
+    if not data or not data.itemName then
+        TriggerClientEvent('free-restaurants:client:consumptionComplete', source, {
+            success = false,
+            error = 'Invalid consumption data',
+        })
+        return
+    end
+
+    local itemName = data.itemName
+    local slot = data.slot
+    local usesConsumed = data.usesConsumed or 1
+    local totalUses = data.totalUses or 1
+    local partial = data.partial
+
+    -- For partial consumption, we could implement partial item durability
+    -- For now, if any uses were consumed, remove the whole item
+    if usesConsumed > 0 then
+        local success = exports.ox_inventory:RemoveItem(source, itemName, 1, nil, slot)
+
+        if success then
+            print(('[free-restaurants] Player %s consumed %s (%d/%d uses)'):format(
+                player.PlayerData.citizenid, itemName, usesConsumed, totalUses
+            ))
+
+            TriggerClientEvent('free-restaurants:client:consumptionComplete', source, {
+                success = true,
+                itemName = itemName,
+                usesConsumed = usesConsumed,
+                partial = partial,
+            })
+        else
+            TriggerClientEvent('free-restaurants:client:consumptionComplete', source, {
+                success = false,
+                error = 'Failed to remove item from inventory',
+            })
+        end
+    end
+end)
+
+--- Get item effects configuration for client
+--- This allows server to validate consumption
+lib.callback.register('free-restaurants:server:getItemEffects', function(source, itemName)
+    -- In production, you might want server-side effect validation
+    -- For now, we trust the client-side Config.ItemEffects
+    return true
+end)
+
 print('[free-restaurants] server/crafting.lua loaded')
