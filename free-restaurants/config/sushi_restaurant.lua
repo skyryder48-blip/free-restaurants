@@ -814,3 +814,5 @@ Config.Locations['benihana'] = {
 }
 
 print('[free-restaurants] config/sushi_restaurant.lua loaded')
+print('[free-restaurants] *** TEST: If you see this, git changes ARE reaching the server ***')
+print('[free-restaurants] *** Next shared_script should be config/ordering.lua ***')
