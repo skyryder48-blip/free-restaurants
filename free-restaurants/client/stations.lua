@@ -1205,7 +1205,7 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
             end,
         })
 
-        -- Option to pick up completed item from slot
+        -- Option to pick up completed item from slot (only for non-ruined items)
         table.insert(targetOptions, {
             name = ('%s_slot_%d_pickup'):format(fullStationKey, slotIndex),
             label = numSlots > 1
@@ -1218,13 +1218,38 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
                     return false
                 end
 
-                -- Check if there's a pending pickup at this slot
+                -- Check if there's a pending pickup at this slot that is NOT ruined
                 local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
-                return pendingPickups[pendingKey] ~= nil
+                local pending = pendingPickups[pendingKey]
+                return pending ~= nil and not pending.ruined
             end,
             onSelect = function()
                 local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
                 pickupItemFromStation(pendingKey)
+            end,
+        })
+
+        -- Option to clean up ruined (burnt/spilled) items from slot
+        table.insert(targetOptions, {
+            name = ('%s_slot_%d_cleanup'):format(fullStationKey, slotIndex),
+            label = numSlots > 1
+                and ('Clean Up Ruined Item (Slot %d)'):format(slotIndex)
+                or 'Clean Up Ruined Item',
+            icon = 'fa-solid fa-trash',
+            canInteract = function()
+                -- Check if on duty
+                if not FreeRestaurants.Client.IsOnDuty() then
+                    return false
+                end
+
+                -- Check if there's a ruined item at this slot
+                local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
+                local pending = pendingPickups[pendingKey]
+                return pending ~= nil and pending.ruined == true
+            end,
+            onSelect = function()
+                local pendingKey = ('%s_%s_%d'):format(locationKey, stationKey, slotIndex)
+                cleanupRuinedItem(pendingKey)
             end,
         })
     end
@@ -1863,17 +1888,18 @@ openBatchPickupDialog = function(locationKey, stationKey)
 end
 
 --- Handle item burn or spill when timer expires
+--- Items remain in slot and must be manually cleaned up
 ---@param pendingKey string The pending pickup key
 handleItemBurnOrSpill = function(pendingKey)
     local pending = pendingPickups[pendingKey]
     if not pending then return end
 
     local pickupConfig = pending.pickupConfig
-    local isBurn = pickupConfig.canBurn
+    local isBurn = pickupConfig and pickupConfig.canBurn
     local fullStationKey = ('%s_%s'):format(pending.locationKey, pending.stationKey)
 
-    -- Call server to handle burn/spill
-    lib.callback.await(
+    -- Call server to handle burn/spill (marks item as ruined, keeps in slot)
+    local result = lib.callback.await(
         'free-restaurants:server:handleBurnOrSpill',
         false,
         pending.locationKey,
@@ -1882,11 +1908,16 @@ handleItemBurnOrSpill = function(pendingKey)
         isBurn
     )
 
+    -- Mark local pending pickup as ruined (don't clear it)
+    pending.ruined = true
+    pending.ruinedType = isBurn and 'burnt' or 'spilled'
+    pending.quality = 0
+
     -- Show notification
     if isBurn then
         lib.notify({
             title = 'Food Burned!',
-            description = ('%s was left too long and burned!'):format(pending.recipeLabel or 'Item'),
+            description = ('%s was left too long and burned! Clean it up to use this slot.'):format(pending.recipeLabel or 'Item'),
             type = 'error',
         })
 
@@ -1904,19 +1935,79 @@ handleItemBurnOrSpill = function(pendingKey)
     else
         lib.notify({
             title = 'Drink Spilled!',
-            description = ('%s was left too long and spilled!'):format(pending.recipeLabel or 'Item'),
+            description = ('%s was left too long and spilled! Clean it up to use this slot.'):format(pending.recipeLabel or 'Item'),
             type = 'error',
         })
 
-        -- Clean up the slot (spilled items don't cause fire)
-        cleanupSlot(fullStationKey, pending.slotIndex)
+        -- Update prop to spilled state (don't clean up - item remains)
+        TriggerEvent('free-restaurants:client:cookingStateUpdate', {
+            locationKey = pending.locationKey,
+            stationKey = pending.stationKey,
+            slotIndex = pending.slotIndex,
+            stationType = pending.stationType,
+            slotCoords = pending.slotCoords,
+            status = 'spilled',
+            progress = 100,
+            quality = 0,
+        })
+    end
+end
+
+--- Clean up a ruined (burnt/spilled) item from a station slot
+---@param pendingKey string The pending pickup key
+local function cleanupRuinedItem(pendingKey)
+    local pending = pendingPickups[pendingKey]
+    if not pending then
+        lib.notify({
+            title = 'Nothing to Clean',
+            description = 'No ruined item at this slot.',
+            type = 'error',
+        })
+        return false
     end
 
-    -- Release the slot
-    releaseSlot(pending.locationKey, pending.stationKey, pending.slotIndex, isBurn and 'burnt' or 'spilled')
+    if not pending.ruined then
+        lib.notify({
+            title = 'Item Not Ruined',
+            description = 'This item can still be picked up.',
+            type = 'error',
+        })
+        return false
+    end
 
-    -- Remove from pending pickups
-    pendingPickups[pendingKey] = nil
+    local fullStationKey = ('%s_%s'):format(pending.locationKey, pending.stationKey)
+
+    -- Call server to clean up
+    local success = lib.callback.await(
+        'free-restaurants:server:cleanupRuinedItem',
+        false,
+        pending.locationKey,
+        pending.stationKey,
+        pending.slotIndex
+    )
+
+    if success then
+        lib.notify({
+            title = 'Cleaned Up',
+            description = ('Disposed of %s %s'):format(pending.ruinedType or 'ruined', pending.recipeLabel or 'item'),
+            type = 'success',
+        })
+
+        -- Clear local pending pickup
+        pendingPickups[pendingKey] = nil
+
+        -- Clean up visual effects
+        cleanupSlot(fullStationKey, pending.slotIndex)
+
+        return true
+    else
+        lib.notify({
+            title = 'Cleanup Failed',
+            description = 'Could not clean up the item.',
+            type = 'error',
+        })
+        return false
+    end
 end
 
 --- Start the pickup timer for an item
@@ -2607,6 +2698,27 @@ RegisterNetEvent('free-restaurants:client:syncFireExtinguished', function(data)
     end
     
     FreeRestaurants.Utils.Debug(('Fire extinguished sync: %s'):format(fireKey))
+end)
+
+-- Admin command to clear fire (sent from server)
+RegisterNetEvent('free-restaurants:client:adminClearFire', function(data)
+    if not data then return end
+
+    local fireKey = getFireKey(data.stationKey, data.slotIndex)
+    local state = fireState[fireKey]
+
+    -- Get coords from state if available
+    local coords = state and state.coords
+
+    -- Stop fire using our function (bypasses extinguisher check)
+    stopFire(data.stationKey, data.slotIndex, false)
+
+    -- Extra cleanup: Stop any fires in the area using StopFireInRange
+    if coords then
+        StopFireInRange(coords.x, coords.y, coords.z, 25.0)
+    end
+
+    FreeRestaurants.Utils.Debug(('Admin cleared fire: %s'):format(fireKey))
 end)
 
 -- ============================================================================
