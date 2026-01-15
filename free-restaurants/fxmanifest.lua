@@ -30,7 +30,7 @@ shared_scripts {
     'config/locations.lua',
     'config/item_effects.lua',
     'config/sushi_restaurant.lua',
-    'config/ordering.lua',
+    'config/ordering_config.lua',
 }
 
 -- Client scripts
