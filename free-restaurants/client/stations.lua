@@ -2137,6 +2137,151 @@ RegisterNetEvent('free-restaurants:client:externalFireExtinguished', function(co
     end
 end)
 
+-- ============================================================================
+-- SYNCED COOKING VISUALS (Server-authoritative)
+-- ============================================================================
+
+-- Handle server cooking state broadcasts (synced across all players)
+RegisterNetEvent('free-restaurants:client:syncCookingState', function(data)
+    if not data then return end
+
+    local fullStationKey = ('%s_%s'):format(data.locationKey, data.stationKey)
+
+    -- Update local slot state
+    if not stationSlots[fullStationKey] then
+        stationSlots[fullStationKey] = {}
+    end
+    if not stationSlots[fullStationKey][data.slotIndex] then
+        stationSlots[fullStationKey][data.slotIndex] = {}
+    end
+
+    local slotState = stationSlots[fullStationKey][data.slotIndex]
+    slotState.status = data.status
+    slotState.progress = data.progress
+    slotState.recipeId = data.recipeId
+    slotState.recipeLabel = data.recipeLabel
+    slotState.quality = data.quality
+    slotState.startTime = data.startTime
+    slotState.endTime = data.endTime
+
+    -- Trigger visual updates based on status
+    if data.status == 'cooking' then
+        -- Update prop to cooking state
+        onCookingStateUpdate({
+            locationKey = data.locationKey,
+            stationKey = data.stationKey,
+            slotIndex = data.slotIndex,
+            status = 'cooking',
+            progress = data.progress or 0,
+            quality = data.quality or 100,
+            recipeId = data.recipeId,
+        })
+
+    elseif data.status == 'ready' then
+        -- Update prop to cooked state
+        onCookingStateUpdate({
+            locationKey = data.locationKey,
+            stationKey = data.stationKey,
+            slotIndex = data.slotIndex,
+            status = 'ready',
+            progress = 100,
+            quality = data.quality or 100,
+            recipeId = data.recipeId,
+        })
+
+        -- Register for pickup if this has a pickup config
+        local stationData = nil
+        local location = FreeRestaurants.Client.GetCurrentLocation()
+        if location and location.stations then
+            stationData = location.stations[data.stationKey]
+        end
+
+        if stationData then
+            local stationType = stationData.type or 'grill'
+            local stationTypeConfig = Config.Stations and Config.Stations.Types and Config.Stations.Types[stationType]
+            local pickupConfig = stationTypeConfig and stationTypeConfig.pickup
+
+            if pickupConfig and pickupConfig.required then
+                local pendingKey = ('%s_%s_%d'):format(data.locationKey, data.stationKey, data.slotIndex)
+                pendingPickups[pendingKey] = {
+                    locationKey = data.locationKey,
+                    stationKey = data.stationKey,
+                    slotIndex = data.slotIndex,
+                    stationType = stationType,
+                    recipeId = data.recipeId,
+                    recipeLabel = data.recipeLabel,
+                    quality = data.quality,
+                    pickupConfig = pickupConfig,
+                    createdAt = GetGameTimer(),
+                }
+
+                -- Start timer if there's a timeout
+                if pickupConfig.timeout and pickupConfig.timeout > 0 then
+                    startPickupTimer(pendingKey, pickupConfig)
+                end
+            end
+        end
+
+    elseif data.status == 'cancelled' then
+        -- Clean up the slot
+        cleanupSlot(fullStationKey, data.slotIndex)
+
+    elseif data.status == 'burnt' then
+        -- Update to burnt state
+        onCookingStateUpdate({
+            locationKey = data.locationKey,
+            stationKey = data.stationKey,
+            slotIndex = data.slotIndex,
+            status = 'burnt',
+            progress = 100,
+            quality = 0,
+        })
+    end
+
+    FreeRestaurants.Utils.Debug(('[syncCookingState] %s slot %d: %s (progress: %d)'):format(
+        fullStationKey, data.slotIndex, data.status, data.progress or 0
+    ))
+end)
+
+-- Handle notification when player's own cooking finishes
+RegisterNetEvent('free-restaurants:client:cookingFinished', function(data)
+    if not data then return end
+
+    local qualityLabel = 'Good'
+    if data.quality >= 90 then
+        qualityLabel = 'Excellent'
+    elseif data.quality >= 75 then
+        qualityLabel = 'Good'
+    elseif data.quality >= 50 then
+        qualityLabel = 'Average'
+    else
+        qualityLabel = 'Poor'
+    end
+
+    lib.notify({
+        title = 'Cooking Complete!',
+        description = ('%s is ready for pickup (%s quality)'):format(data.recipeLabel, qualityLabel),
+        type = 'success',
+        duration = 5000,
+    })
+
+    -- Play completion sound
+    PlaySoundFrontend(-1, 'PICK_UP_MONEY', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
+end)
+
+-- Request cooking state sync for a location when entering
+local function requestCookingStateSync(locationKey)
+    -- This will be called when a player enters a restaurant location
+    -- Server can respond with all active cooking sessions for that location
+    lib.callback.await('free-restaurants:server:getLocationCookingStates', false, locationKey, function(states)
+        if not states then return end
+
+        for _, state in ipairs(states) do
+            TriggerEvent('free-restaurants:client:syncCookingState', state)
+        end
+    end)
+end
+
 -- Resource cleanup
 AddEventHandler('onResourceStop', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end

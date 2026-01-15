@@ -936,6 +936,328 @@ lib.callback.register('free-restaurants:server:clearPendingItem', function(sourc
 end)
 
 -- ============================================================================
+-- AUTONOMOUS COOKING SYSTEM
+-- ============================================================================
+
+-- Track active cooking sessions
+-- Key format: "locationKey:stationKey:slotIndex"
+local activeCookingSessions = {}
+
+--- Get cooking session key
+---@param locationKey string
+---@param stationKey string
+---@param slotIndex number
+---@return string
+local function getCookingSessionKey(locationKey, stationKey, slotIndex)
+    return ('%s:%s:%d'):format(locationKey, stationKey, slotIndex)
+end
+
+--- Broadcast cooking state to all clients
+---@param locationKey string
+---@param stationKey string
+---@param slotIndex number
+---@param status string 'cooking', 'ready', 'burnt', 'cancelled'
+---@param progress number 0-100
+---@param data table Additional data
+local function broadcastCookingState(locationKey, stationKey, slotIndex, status, progress, data)
+    TriggerClientEvent('free-restaurants:client:syncCookingState', -1, {
+        locationKey = locationKey,
+        stationKey = stationKey,
+        slotIndex = slotIndex,
+        status = status,
+        progress = progress,
+        recipeId = data.recipeId,
+        recipeLabel = data.recipeLabel,
+        quality = data.quality,
+        startTime = data.startTime,
+        endTime = data.endTime,
+        craftedBy = data.craftedBy,
+    })
+end
+
+--- Complete autonomous cooking - called when timer finishes
+---@param sessionKey string The cooking session key
+local function completeAutonomousCooking(sessionKey)
+    local session = activeCookingSessions[sessionKey]
+    if not session then return end
+
+    local recipe = Config.Recipes.Items[session.recipeId]
+    if not recipe then
+        activeCookingSessions[sessionKey] = nil
+        return
+    end
+
+    -- Calculate final quality with freshness
+    local finalQuality = calculateItemQuality(session.quality, session.avgFreshness or 100)
+
+    -- Get result item info
+    local result = recipe.result
+    local itemName = type(result) == 'table' and result.item or result
+    local amount = type(result) == 'table' and (result.amount or result.count) or 1
+
+    -- Build metadata
+    local metadata = {
+        quality = finalQuality,
+        craftedAt = os.time(),
+        craftedBy = session.craftedByCid,
+    }
+
+    -- Add freshness for food items
+    if recipe.category == 'food' or recipe.isFoodItem then
+        metadata.freshness = finalQuality
+        metadata.decayRate = recipe.decayRate or 1.0
+    end
+
+    -- Apply quality tier label
+    local qualityLabel, qualityTier = getQualityInfo(finalQuality)
+    metadata.qualityLabel = qualityLabel
+    metadata.qualityTier = qualityTier
+
+    -- Store pending item at station for pickup
+    local pendingKey = getPendingItemKey(session.locationKey, session.stationKey, session.slotIndex)
+    pendingStationItems[pendingKey] = {
+        recipeId = session.recipeId,
+        itemName = itemName,
+        amount = amount,
+        metadata = metadata,
+        quality = finalQuality,
+        craftedBy = session.craftedBy,
+        craftedByCid = session.craftedByCid,
+        craftedByName = session.craftedByName,
+        craftedAt = os.time(),
+        locationKey = session.locationKey,
+        stationKey = session.stationKey,
+        slotIndex = session.slotIndex,
+        recipe = recipe,
+    }
+
+    -- Mark slot as ready for pickup
+    exports['free-restaurants']:MarkSlotForPickup(session.craftedBy, session.locationKey, session.stationKey, session.slotIndex)
+
+    -- Award XP
+    if session.craftedBy and GetPlayerName(session.craftedBy) then
+        awardCraftXP(session.craftedBy, recipe, finalQuality)
+        exports['free-restaurants']:IncrementTasks(session.craftedBy)
+    end
+
+    -- Broadcast cooking complete to all clients
+    broadcastCookingState(session.locationKey, session.stationKey, session.slotIndex, 'ready', 100, {
+        recipeId = session.recipeId,
+        recipeLabel = recipe.label,
+        quality = finalQuality,
+        startTime = session.startTime,
+        endTime = os.time() * 1000,
+        craftedBy = session.craftedBy,
+    })
+
+    -- Notify the player who started the cooking (if still online)
+    if session.craftedBy and GetPlayerName(session.craftedBy) then
+        TriggerClientEvent('free-restaurants:client:cookingFinished', session.craftedBy, {
+            recipeId = session.recipeId,
+            recipeLabel = recipe.label,
+            locationKey = session.locationKey,
+            stationKey = session.stationKey,
+            slotIndex = session.slotIndex,
+            quality = finalQuality,
+        })
+    end
+
+    print(('[free-restaurants] Autonomous cooking complete: %s at %s/%s slot %d (quality: %d)'):format(
+        session.recipeId, session.locationKey, session.stationKey, session.slotIndex, finalQuality
+    ))
+
+    -- Clear the cooking session
+    activeCookingSessions[sessionKey] = nil
+end
+
+--- Start autonomous cooking for a single slot
+lib.callback.register('free-restaurants:server:startAutonomousCooking', function(source, data)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false end
+
+    local recipe = Config.Recipes.Items[data.recipeId]
+    if not recipe then return false end
+
+    local sessionKey = getCookingSessionKey(data.locationKey, data.stationKey, data.slotIndex)
+
+    -- Check if slot is already cooking
+    if activeCookingSessions[sessionKey] then
+        return false
+    end
+
+    local craftTime = data.craftTime or 10000  -- Default 10 seconds
+
+    -- Store cooking session
+    activeCookingSessions[sessionKey] = {
+        recipeId = data.recipeId,
+        locationKey = data.locationKey,
+        stationKey = data.stationKey,
+        slotIndex = data.slotIndex,
+        quality = data.quality or 1.0,
+        avgFreshness = data.avgFreshness or 100,
+        craftTime = craftTime,
+        startTime = os.time() * 1000,
+        endTime = (os.time() * 1000) + craftTime,
+        craftedBy = source,
+        craftedByCid = player.PlayerData.citizenid,
+        craftedByName = player.PlayerData.charinfo.firstname .. ' ' .. player.PlayerData.charinfo.lastname,
+    }
+
+    -- Broadcast cooking started to all clients
+    broadcastCookingState(data.locationKey, data.stationKey, data.slotIndex, 'cooking', 0, {
+        recipeId = data.recipeId,
+        recipeLabel = recipe.label,
+        quality = data.quality,
+        startTime = activeCookingSessions[sessionKey].startTime,
+        endTime = activeCookingSessions[sessionKey].endTime,
+        craftedBy = source,
+    })
+
+    -- Start timer for cooking completion
+    SetTimeout(craftTime, function()
+        completeAutonomousCooking(sessionKey)
+    end)
+
+    print(('[free-restaurants] Started autonomous cooking: %s at %s/%s slot %d (time: %dms)'):format(
+        data.recipeId, data.locationKey, data.stationKey, data.slotIndex, craftTime
+    ))
+
+    return true
+end)
+
+--- Start autonomous cooking for multiple slots (batch)
+lib.callback.register('free-restaurants:server:startBatchAutonomousCooking', function(source, data)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false end
+
+    local recipe = Config.Recipes.Items[data.recipeId]
+    if not recipe then return false end
+
+    local craftTime = data.craftTime or 10000
+    local slots = data.slots or {}
+
+    if #slots == 0 then return false end
+
+    -- Start cooking for each slot
+    for i, slotIndex in ipairs(slots) do
+        local sessionKey = getCookingSessionKey(data.locationKey, data.stationKey, slotIndex)
+
+        -- Check if slot is already cooking
+        if activeCookingSessions[sessionKey] then
+            print(('[free-restaurants] Slot %d already cooking, skipping'):format(slotIndex))
+        else
+            -- Store cooking session
+            activeCookingSessions[sessionKey] = {
+                recipeId = data.recipeId,
+                locationKey = data.locationKey,
+                stationKey = data.stationKey,
+                slotIndex = slotIndex,
+                quality = data.quality or 1.0,
+                avgFreshness = data.avgFreshness or 100,
+                craftTime = craftTime,
+                startTime = os.time() * 1000,
+                endTime = (os.time() * 1000) + craftTime,
+                craftedBy = source,
+                craftedByCid = player.PlayerData.citizenid,
+                craftedByName = player.PlayerData.charinfo.firstname .. ' ' .. player.PlayerData.charinfo.lastname,
+                isBatchItem = true,
+                batchIndex = i,
+                batchTotal = #slots,
+            }
+
+            -- Broadcast cooking started
+            broadcastCookingState(data.locationKey, data.stationKey, slotIndex, 'cooking', 0, {
+                recipeId = data.recipeId,
+                recipeLabel = recipe.label,
+                quality = data.quality,
+                startTime = activeCookingSessions[sessionKey].startTime,
+                endTime = activeCookingSessions[sessionKey].endTime,
+                craftedBy = source,
+            })
+
+            -- Start timer for this slot's cooking completion
+            local capturedSessionKey = sessionKey
+            SetTimeout(craftTime, function()
+                completeAutonomousCooking(capturedSessionKey)
+            end)
+        end
+    end
+
+    print(('[free-restaurants] Started batch autonomous cooking: %dx %s at %s/%s (time: %dms)'):format(
+        #slots, data.recipeId, data.locationKey, data.stationKey, craftTime
+    ))
+
+    return true
+end)
+
+--- Get current cooking state for a slot (for late-joining players)
+lib.callback.register('free-restaurants:server:getCookingState', function(source, locationKey, stationKey, slotIndex)
+    local sessionKey = getCookingSessionKey(locationKey, stationKey, slotIndex)
+    local session = activeCookingSessions[sessionKey]
+
+    if not session then
+        -- Check if there's a pending item (cooking finished)
+        local pendingKey = getPendingItemKey(locationKey, stationKey, slotIndex)
+        local pending = pendingStationItems[pendingKey]
+        if pending then
+            return {
+                status = 'ready',
+                recipeId = pending.recipeId,
+                recipeLabel = pending.recipe.label,
+                quality = pending.quality,
+            }
+        end
+        return nil
+    end
+
+    local now = os.time() * 1000
+    local progress = math.floor(((now - session.startTime) / session.craftTime) * 100)
+    progress = math.min(100, math.max(0, progress))
+
+    local recipe = Config.Recipes.Items[session.recipeId]
+
+    return {
+        status = 'cooking',
+        recipeId = session.recipeId,
+        recipeLabel = recipe and recipe.label or session.recipeId,
+        quality = session.quality,
+        progress = progress,
+        startTime = session.startTime,
+        endTime = session.endTime,
+        craftedBy = session.craftedBy,
+        craftedByName = session.craftedByName,
+    }
+end)
+
+--- Cancel cooking (e.g., if station is damaged or admin action)
+lib.callback.register('free-restaurants:server:cancelCooking', function(source, locationKey, stationKey, slotIndex)
+    local sessionKey = getCookingSessionKey(locationKey, stationKey, slotIndex)
+    local session = activeCookingSessions[sessionKey]
+
+    if not session then
+        return false, 'No active cooking at this slot'
+    end
+
+    -- Broadcast cancellation
+    broadcastCookingState(locationKey, stationKey, slotIndex, 'cancelled', 0, {
+        recipeId = session.recipeId,
+        recipeLabel = '',
+        quality = 0,
+        startTime = session.startTime,
+        endTime = os.time() * 1000,
+        craftedBy = session.craftedBy,
+    })
+
+    -- Release the slot
+    exports['free-restaurants']:ReleaseSlot(0, locationKey, stationKey, slotIndex, 'cancelled')
+
+    -- Clear the session
+    activeCookingSessions[sessionKey] = nil
+
+    return true
+end)
+
+-- ============================================================================
 -- EXPORTS
 -- ============================================================================
 
