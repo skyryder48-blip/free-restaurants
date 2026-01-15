@@ -10,7 +10,7 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
             background: transparent;
@@ -19,50 +19,196 @@
             width: 100vw;
             height: 100vh;
         }
-        
+
         .hud-container {
             width: 100%;
             height: 100%;
             position: relative;
         }
+
+        .hidden {
+            display: none !important;
+        }
     </style>
     <link rel="stylesheet" href="station-hud/styles.css">
+    <link rel="stylesheet" href="kds/kds.css">
+    <link rel="stylesheet" href="kds/kiosk.css">
 </head>
 <body>
     <div class="hud-container">
         <!-- Station HUD -->
         <div id="station-hud-root"></div>
-        
-        <!-- Future HUD components can be added here -->
+
         <!-- Kitchen Display System -->
-        <!-- Order Queue -->
-        <!-- etc. -->
+        <div id="kds-container" class="hidden">
+            <div class="kds-header">
+                <div class="kds-logo">
+                    <span class="kds-title">Kitchen Display System</span>
+                </div>
+                <div class="kds-stats">
+                    <div class="stat pending">
+                        <span class="count" id="pending-count">0</span>
+                        <span class="label">Pending</span>
+                    </div>
+                    <div class="stat in-progress">
+                        <span class="count" id="progress-count">0</span>
+                        <span class="label">In Progress</span>
+                    </div>
+                    <div class="stat ready">
+                        <span class="count" id="ready-count">0</span>
+                        <span class="label">Ready</span>
+                    </div>
+                </div>
+                <div class="kds-time" id="kds-time">00:00</div>
+            </div>
+
+            <div class="kds-orders" id="kds-orders">
+                <div class="no-orders" id="no-orders">
+                    <div class="no-orders-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+                            <rect x="9" y="3" width="6" height="4" rx="2"/>
+                        </svg>
+                    </div>
+                    <span>No Active Orders</span>
+                    <small>Orders will appear here when placed</small>
+                </div>
+            </div>
+
+            <div class="kds-footer">
+                <span class="kds-location" id="kds-location">Restaurant</span>
+                <button class="kds-close-btn" id="kds-close-btn">Close KDS</button>
+            </div>
+        </div>
+
+        <!-- Kiosk Order System -->
+        <div id="kiosk-container" class="hidden">
+            <div class="kiosk-header">
+                <div class="kiosk-logo">
+                    <span class="restaurant-name" id="kiosk-restaurant-name">Restaurant</span>
+                </div>
+                <div class="kiosk-cart-icon" id="kiosk-cart-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/>
+                    </svg>
+                    <span class="cart-badge" id="kiosk-cart-count">0</span>
+                </div>
+            </div>
+
+            <div class="kiosk-content">
+                <div class="kiosk-categories" id="kiosk-categories"></div>
+                <div class="kiosk-items" id="kiosk-items"></div>
+            </div>
+
+            <div class="kiosk-cart-sidebar hidden" id="kiosk-cart-sidebar">
+                <div class="cart-header">
+                    <h2>Your Order</h2>
+                    <button class="close-cart" id="close-cart-btn">&times;</button>
+                </div>
+                <div class="cart-items" id="cart-items"></div>
+                <div class="cart-totals">
+                    <div class="total-row"><span>Subtotal</span><span id="cart-subtotal">$0.00</span></div>
+                    <div class="total-row"><span>Tax</span><span id="cart-tax">$0.00</span></div>
+                    <div class="total-row total"><span>Total</span><span id="cart-total">$0.00</span></div>
+                </div>
+                <div class="cart-actions">
+                    <button class="btn-clear" id="clear-cart-btn">Clear Cart</button>
+                    <button class="btn-checkout" id="checkout-btn">Place Order</button>
+                </div>
+            </div>
+
+            <div class="kiosk-footer">
+                <button class="btn-cancel" id="kiosk-cancel-btn">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Receipt Modal -->
+        <div id="receipt-modal" class="modal hidden">
+            <div class="receipt-container">
+                <div class="receipt-header">
+                    <div class="receipt-logo" id="receipt-restaurant">Restaurant</div>
+                    <div class="receipt-info">
+                        <span class="receipt-order-num" id="receipt-order-num">Order #0000</span>
+                        <span class="receipt-date" id="receipt-date"></span>
+                    </div>
+                </div>
+                <div class="receipt-divider"></div>
+                <div class="receipt-items" id="receipt-items"></div>
+                <div class="receipt-divider"></div>
+                <div class="receipt-totals" id="receipt-totals"></div>
+                <div class="receipt-footer">
+                    <span class="receipt-message">Thank you for your order!</span>
+                    <span class="receipt-wait" id="receipt-wait">Estimated wait: 5-10 mins</span>
+                </div>
+                <button class="btn-close-receipt" id="close-receipt-btn">Done</button>
+            </div>
+        </div>
     </div>
-    
+
     <!-- React for HUD components -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    
+
     <!-- Station HUD -->
     <script src="station-hud/app.js"></script>
-    
+
+    <!-- KDS and Kiosk -->
+    <script src="kds/kds.js"></script>
+    <script src="kds/kiosk.js"></script>
+
     <!-- Main NUI controller -->
     <script>
         // Global message router
         window.addEventListener('message', function(event) {
             const { type, data } = event.data;
-            
-            // Route messages to appropriate HUD components
-            // Station HUD handles its own messages internally
-            
-            // Handle global NUI commands
+
+            // Route messages to appropriate components
             switch (type) {
                 case 'setVisible':
                     document.body.style.display = data.visible ? 'block' : 'none';
                     break;
+
+                // KDS Messages
+                case 'kds:show':
+                    if (window.KDS) window.KDS.show(data);
+                    break;
+                case 'kds:hide':
+                    if (window.KDS) window.KDS.hide();
+                    break;
+                case 'kds:update':
+                    if (window.KDS) window.KDS.updateOrders(data.orders);
+                    break;
+                case 'kds:newOrder':
+                    if (window.KDS) window.KDS.addOrder(data.order);
+                    break;
+                case 'kds:orderUpdate':
+                    if (window.KDS) window.KDS.updateOrder(data.orderId, data.status);
+                    break;
+                case 'kds:removeOrder':
+                    if (window.KDS) window.KDS.removeOrder(data.orderId);
+                    break;
+
+                // Kiosk Messages
+                case 'kiosk:show':
+                    if (window.Kiosk) window.Kiosk.show(data);
+                    break;
+                case 'kiosk:hide':
+                    if (window.Kiosk) window.Kiosk.hide();
+                    break;
+                case 'kiosk:setMenu':
+                    if (window.Kiosk) window.Kiosk.setMenu(data.menu, data.categories);
+                    break;
+
+                // Receipt Messages
+                case 'receipt:show':
+                    if (window.Receipt) window.Receipt.show(data);
+                    break;
+                case 'receipt:hide':
+                    if (window.Receipt) window.Receipt.hide();
+                    break;
             }
         });
-        
+
         // NUI callback helper
         window.postNUI = function(action, data) {
             return fetch(`https://${GetParentResourceName()}/${action}`, {
@@ -71,7 +217,7 @@
                 body: JSON.stringify(data || {}),
             }).catch(() => {});
         };
-        
+
         // Get parent resource name
         function GetParentResourceName() {
             return window.GetParentResourceName ? window.GetParentResourceName() : 'free-restaurants';
