@@ -1545,8 +1545,8 @@ end)
 -- ============================================================================
 
 --- Handle item consumption from client
---- Updates item metadata to track remaining uses - item stays in inventory
---- Player must manually dispose of depleted items
+--- When item is fully depleted, replaces with appropriate container
+--- Player must manually dispose of container at trash can
 RegisterNetEvent('free-restaurants:server:consumeItem', function(data)
     local source = source
     local player = exports.qbx_core:GetPlayer(source)
@@ -1576,24 +1576,56 @@ RegisterNetEvent('free-restaurants:server:consumeItem', function(data)
             local currentUses = item.metadata and item.metadata.usesRemaining or totalUses
             local remainingUses = math.max(0, currentUses - usesConsumed)
 
-            -- Update metadata instead of removing item
-            local newMetadata = item.metadata or {}
-            newMetadata.usesRemaining = remainingUses
-            newMetadata.totalUses = totalUses
-            newMetadata.lastConsumed = os.time()
+            local depletedContainer = nil
 
-            -- Mark as depleted if no uses remain
             if remainingUses <= 0 then
-                newMetadata.depleted = true
-                newMetadata.depletedAt = os.time()
+                -- Item is fully consumed - replace with container
+                local containerName = Config.ItemEffects.GetDepletedContainer(itemName)
+
+                if containerName then
+                    -- Remove the consumed item
+                    local removed = exports.ox_inventory:RemoveItem(source, itemName, 1, nil, slot)
+
+                    if removed then
+                        -- Give the depleted container
+                        local containerAdded = exports.ox_inventory:AddItem(source, containerName, 1, {
+                            originalItem = itemName,
+                            depletedAt = os.time(),
+                        })
+
+                        if containerAdded then
+                            depletedContainer = containerName
+                            print(('[free-restaurants] Player %s consumed %s, replaced with %s'):format(
+                                player.PlayerData.citizenid, itemName, containerName
+                            ))
+                        else
+                            print(('[free-restaurants] Failed to give container %s to player %s'):format(
+                                containerName, player.PlayerData.citizenid
+                            ))
+                        end
+                    end
+                else
+                    -- No container defined - just mark as depleted in metadata
+                    local newMetadata = item.metadata or {}
+                    newMetadata.usesRemaining = 0
+                    newMetadata.totalUses = totalUses
+                    newMetadata.lastConsumed = os.time()
+                    newMetadata.depleted = true
+                    newMetadata.depletedAt = os.time()
+                    exports.ox_inventory:SetMetadata(source, slot, newMetadata)
+                end
+            else
+                -- Still has uses remaining - update metadata
+                local newMetadata = item.metadata or {}
+                newMetadata.usesRemaining = remainingUses
+                newMetadata.totalUses = totalUses
+                newMetadata.lastConsumed = os.time()
+                exports.ox_inventory:SetMetadata(source, slot, newMetadata)
+
+                print(('[free-restaurants] Player %s consumed %s (%d/%d uses, %d remaining)'):format(
+                    player.PlayerData.citizenid, itemName, usesConsumed, totalUses, remainingUses
+                ))
             end
-
-            -- Update item metadata
-            exports.ox_inventory:SetMetadata(source, slot, newMetadata)
-
-            print(('[free-restaurants] Player %s consumed %s (%d/%d uses, %d remaining)'):format(
-                player.PlayerData.citizenid, itemName, usesConsumed, totalUses, remainingUses
-            ))
 
             TriggerClientEvent('free-restaurants:client:consumptionComplete', source, {
                 success = true,
@@ -1601,6 +1633,7 @@ RegisterNetEvent('free-restaurants:server:consumeItem', function(data)
                 usesConsumed = usesConsumed,
                 remainingUses = remainingUses,
                 depleted = remainingUses <= 0,
+                depletedContainer = depletedContainer,
                 partial = partial,
             })
         else
@@ -1613,6 +1646,7 @@ RegisterNetEvent('free-restaurants:server:consumeItem', function(data)
 end)
 
 --- Dispose of a depleted/empty item (for recycling/RP)
+--- Gives recycling rewards for certain containers
 RegisterNetEvent('free-restaurants:server:disposeItem', function(data)
     local source = source
     local player = exports.qbx_core:GetPlayer(source)
@@ -1634,11 +1668,17 @@ RegisterNetEvent('free-restaurants:server:disposeItem', function(data)
         return
     end
 
-    -- Check if item is depleted or ruined
+    -- Check if item is a depleted container
+    local isContainer = Config.ItemEffects.RecyclingValues and Config.ItemEffects.RecyclingValues[item.name]
+
+    -- Check if item is depleted or ruined food
     local canDispose = false
     local reason = ''
 
-    if item.metadata then
+    if isContainer then
+        canDispose = true
+        reason = 'recycled'
+    elseif item.metadata then
         if item.metadata.depleted then
             canDispose = true
             reason = 'empty container'
@@ -1654,28 +1694,48 @@ RegisterNetEvent('free-restaurants:server:disposeItem', function(data)
         end
     end
 
-    -- Also allow disposal of any food item (for RP purposes)
+    -- Also allow disposal of any food item at trash can (force flag)
     if data.force and Config.ItemEffects and Config.ItemEffects.Items[item.name] then
         canDispose = true
         reason = 'discarded'
+    end
+
+    -- Allow disposing containers even without depleted flag
+    if not canDispose and isContainer then
+        canDispose = true
+        reason = 'recycled'
     end
 
     if canDispose then
         local removed = exports.ox_inventory:RemoveItem(source, item.name, 1, nil, data.slot)
 
         if removed then
-            print(('[free-restaurants] Player %s disposed of %s (%s)'):format(
-                player.PlayerData.citizenid, item.name, reason
+            local recyclingReward = 0
+            local recyclingInfo = Config.ItemEffects.RecyclingValues and Config.ItemEffects.RecyclingValues[item.name]
+
+            -- Give recycling reward if applicable
+            if recyclingInfo and recyclingInfo.money and recyclingInfo.money > 0 then
+                recyclingReward = recyclingInfo.money
+                player.Functions.AddMoney('cash', recyclingReward, 'recycling-reward')
+            end
+
+            print(('[free-restaurants] Player %s disposed of %s (%s, reward: $%d)'):format(
+                player.PlayerData.citizenid, item.name, reason, recyclingReward
             ))
 
-            TriggerClientEvent('ox_lib:notify', source, {
-                title = 'Disposed',
-                description = ('Disposed of %s (%s)'):format(item.label or item.name, reason),
-                type = 'success',
-            })
-
-            -- Could add recycling rewards here
-            -- e.g., give small money back for returning containers
+            if recyclingReward > 0 then
+                TriggerClientEvent('ox_lib:notify', source, {
+                    title = 'Recycled',
+                    description = ('Recycled %s (+$%d)'):format(item.label or item.name, recyclingReward),
+                    type = 'success',
+                })
+            else
+                TriggerClientEvent('ox_lib:notify', source, {
+                    title = 'Disposed',
+                    description = ('Disposed of %s'):format(item.label or item.name),
+                    type = 'success',
+                })
+            end
         else
             TriggerClientEvent('ox_lib:notify', source, {
                 title = 'Error',

@@ -29,6 +29,7 @@ shared_scripts {
     'config/recipes.lua',
     'config/locations.lua',
     'config/item_effects.lua',
+    'config/sushi_restaurant.lua',
 }
 
 -- Client scripts
@@ -46,6 +47,7 @@ client_scripts {
     'client/npc-customers.lua',
     'client/cleaning.lua',
     'client/consumption.lua',
+    'client/status_effects.lua',
 }
 
 -- Server scripts
