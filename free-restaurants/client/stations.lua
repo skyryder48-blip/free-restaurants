@@ -699,8 +699,9 @@ end
 ---@param stationKey string
 ---@param slotIndex number
 ---@param coords vector3|nil
+---@param stationType string|nil Station type for fire config
 ---@param initialStage? number Starting fire stage (default: SMOKE_WARNING)
-local function startFire(stationKey, slotIndex, coords, initialStage)
+local function startFire(stationKey, slotIndex, coords, stationType, initialStage)
     -- Skip fire if no coords available
     if not coords then
         FreeRestaurants.Utils.Debug(('[startFire] No coords for %s slot %d, skipping fire'):format(stationKey, slotIndex))
@@ -710,34 +711,67 @@ local function startFire(stationKey, slotIndex, coords, initialStage)
     local fireKey = getFireKey(stationKey, slotIndex)
     initialStage = initialStage or FireStages.SMOKE_WARNING
 
+    -- Get fire config from station type or use defaults
+    local stationTypeConfig = stationType and Config.Stations.Types[stationType]
+    local stationFireConfig = stationTypeConfig and stationTypeConfig.fire
+    local defaults = Config.Stations.FireDefaults or {}
+
+    local fireConfig = {
+        type = (stationFireConfig and stationFireConfig.type) or defaults.type or 'regular',
+        maxChildren = (stationFireConfig and stationFireConfig.maxChildren) or defaults.maxChildren or 25,
+        autoExtinguish = (stationFireConfig and stationFireConfig.autoExtinguish) or defaults.autoExtinguish or 300,
+        extinguisherEffective = (stationFireConfig and stationFireConfig.extinguisherEffective) or defaults.extinguisherEffective or 60,
+    }
+
     -- Initialize fire state
     fireState[fireKey] = {
         stage = initialStage,
         coords = coords,
+        stationType = stationType,
+        fireConfig = fireConfig,
         spreadRadius = FireConfig.spreadRadius,
         fireHandles = {},
+        startTime = GetGameTimer(),
+        isGasFire = fireConfig.type == 'gas',
     }
-    
+
+    print(('[free-restaurants] Fire started at %s slot %d: type=%s, maxChildren=%d, autoExtinguish=%ds'):format(
+        stationKey, slotIndex, fireConfig.type, fireConfig.maxChildren, fireConfig.autoExtinguish
+    ))
+
     -- Update visuals for initial stage
     updateFireVisuals(stationKey, slotIndex)
-    
+
     -- Start escalation timer
     scheduleFireEscalation(stationKey, slotIndex)
-    
+
+    -- Start auto-extinguish timer if configured
+    if fireConfig.autoExtinguish > 0 then
+        SetTimeout(fireConfig.autoExtinguish * 1000, function()
+            local currentState = fireState[fireKey]
+            if currentState then
+                print(('[free-restaurants] Fire auto-extinguishing at %s slot %d'):format(stationKey, slotIndex))
+                stopFire(stationKey, slotIndex)
+            end
+        end)
+    end
+
     -- Emit event for external scripts (firefighter integration)
     TriggerEvent('free-restaurants:client:fireStarted', {
         stationKey = stationKey,
         slotIndex = slotIndex,
         coords = coords,
         stage = initialStage,
+        fireConfig = fireConfig,
     })
-    
+
     -- Also trigger server event for sync
     TriggerServerEvent('free-restaurants:server:fireStarted', {
         stationKey = stationKey,
         slotIndex = slotIndex,
         coords = coords,
         stage = initialStage,
+        fireConfig = fireConfig,
     })
 end
 
@@ -756,33 +790,44 @@ updateFireVisuals = function(stationKey, slotIndex)
         return
     end
 
+    -- Get fire config from state
+    local fireConfig = state.fireConfig or {}
+    local isGasFire = state.isGasFire or false
+    local maxChildren = fireConfig.maxChildren or 25
+
     -- Stop existing particles for this slot
     stopAllSlotParticles(stationKey, slotIndex)
-    
+
     -- Apply visuals based on stage
     if state.stage == FireStages.SMOKE_WARNING then
         startParticleEffect(stationKey, slotIndex, 'smoke_warning', coords)
-        
+
     elseif state.stage == FireStages.SMALL_FIRE then
         startParticleEffect(stationKey, slotIndex, 'smoke_burning', coords)
         startParticleEffect(stationKey, slotIndex, 'flame_small', coords)
-        
+        -- Start small script fire
+        local fireHandle = StartScriptFire(coords.x, coords.y, coords.z, math.min(5, maxChildren), isGasFire)
+        table.insert(state.fireHandles, fireHandle)
+
     elseif state.stage == FireStages.MEDIUM_FIRE then
         startParticleEffect(stationKey, slotIndex, 'smoke_burning', coords)
         startParticleEffect(stationKey, slotIndex, 'flame_medium', coords)
-        
+        -- Intensify fire
+        local fireHandle = StartScriptFire(coords.x, coords.y, coords.z, math.min(15, maxChildren), isGasFire)
+        table.insert(state.fireHandles, fireHandle)
+
     elseif state.stage >= FireStages.LARGE_FIRE then
         startParticleEffect(stationKey, slotIndex, 'smoke_burning', coords)
         startParticleEffect(stationKey, slotIndex, 'flame_large', coords)
-        
-        -- Start actual script fire for spreading
+
+        -- Start full script fire with configured maxChildren
         if state.stage == FireStages.LARGE_FIRE then
-            local fireHandle = StartScriptFire(coords.x, coords.y, coords.z, 5, false)
+            local fireHandle = StartScriptFire(coords.x, coords.y, coords.z, maxChildren, isGasFire)
             table.insert(state.fireHandles, fireHandle)
-            
+
         elseif state.stage == FireStages.SPREADING then
-            -- Add more fires as it spreads
-            local fireHandle = StartScriptFire(coords.x, coords.y, coords.z, 15, true)
+            -- Maximum spread - use full maxChildren
+            local fireHandle = StartScriptFire(coords.x, coords.y, coords.z, maxChildren, isGasFire)
             table.insert(state.fireHandles, fireHandle)
         end
     end
@@ -877,77 +922,118 @@ end
 spreadFire = function(stationKey, slotIndex)
     local fireKey = getFireKey(stationKey, slotIndex)
     local state = fireState[fireKey]
-    
+
     if not state or state.stage < FireStages.SPREADING then return end
-    
+
+    -- Get fire config
+    local fireConfig = state.fireConfig or {}
+    local isGasFire = state.isGasFire or false
+    local maxChildren = fireConfig.maxChildren or 25
+
     -- Calculate spread position
     local angle = math.random() * 2 * math.pi
     local distance = math.random() * state.spreadRadius
     local spreadX = state.coords.x + math.cos(angle) * distance
     local spreadY = state.coords.y + math.sin(angle) * distance
     local spreadZ = state.coords.z
-    
+
     -- Get ground Z at spread location
     local found, groundZ = GetGroundZFor_3dCoord(spreadX, spreadY, spreadZ + 5.0, false)
     if found then
         spreadZ = groundZ
     end
-    
-    -- Start fire at spread location
-    local fireHandle = StartScriptFire(spreadX, spreadY, spreadZ, 10, true)
+
+    -- Start fire at spread location using station's fire config
+    local fireHandle = StartScriptFire(spreadX, spreadY, spreadZ, maxChildren, isGasFire)
     table.insert(state.fireHandles, fireHandle)
-    
+
     -- Grow spread radius
     if state.spreadRadius < FireConfig.maxSpreadRadius then
         state.spreadRadius = state.spreadRadius + FireConfig.spreadRadiusGrowth
     end
-    
-    FreeRestaurants.Utils.Debug(('Fire spreading at radius %.1f'):format(state.spreadRadius))
-    
+
+    FreeRestaurants.Utils.Debug(('Fire spreading at radius %.1f (gas: %s)'):format(state.spreadRadius, tostring(isGasFire)))
+
     -- Continue spreading
     scheduleFireSpread(stationKey, slotIndex)
-    
+
     -- Notify external scripts
     TriggerEvent('free-restaurants:client:fireSpreading', {
         stationKey = stationKey,
         slotIndex = slotIndex,
         spreadCoords = vec3(spreadX, spreadY, spreadZ),
         spreadRadius = state.spreadRadius,
+        isGasFire = isGasFire,
     })
 end
 
 --- Stop fire at a station slot (called by external firefighter scripts)
 ---@param stationKey string
 ---@param slotIndex number
-local function stopFire(stationKey, slotIndex)
+---@param byExtinguisher boolean|nil Whether stopped by handheld extinguisher
+local function stopFire(stationKey, slotIndex, byExtinguisher)
     local fireKey = getFireKey(stationKey, slotIndex)
     local state = fireState[fireKey]
-    
-    if not state then return end
-    
-    -- Stop all script fires
-    for _, handle in ipairs(state.fireHandles) do
-        RemoveScriptFire(handle)
+
+    if not state then return false end
+
+    -- Check if extinguisher can still be effective
+    if byExtinguisher then
+        local fireConfig = state.fireConfig or {}
+        local extinguisherEffective = fireConfig.extinguisherEffective or 60
+        local fireAge = (GetGameTimer() - (state.startTime or 0)) / 1000
+
+        if extinguisherEffective > 0 and fireAge > extinguisherEffective then
+            -- Fire is too big for handheld extinguisher
+            lib.notify({
+                title = 'Fire Too Large!',
+                description = 'This fire is out of control! Call the Fire Department!',
+                type = 'error',
+                duration = 5000,
+            })
+            return false
+        end
     end
-    
+
+    local coords = state.coords
+
+    -- Method 1: Remove tracked script fires by handle
+    for _, handle in ipairs(state.fireHandles or {}) do
+        if handle then
+            RemoveScriptFire(handle)
+        end
+    end
+
+    -- Method 2: Use StopFireInRange as backup (catches any fires we missed)
+    if coords then
+        -- Stop fires in increasing radius to catch spread fires
+        StopFireInRange(coords.x, coords.y, coords.z, 5.0)
+        StopFireInRange(coords.x, coords.y, coords.z, 10.0)
+        StopFireInRange(coords.x, coords.y, coords.z, state.spreadRadius or 15.0)
+    end
+
     -- Stop particles
     stopAllSlotParticles(stationKey, slotIndex)
-    
+
     -- Clear state
     fireState[fireKey] = nil
     fireEscalationTimers[fireKey] = nil
-    
-    FreeRestaurants.Utils.Debug(('Fire extinguished at %s slot %d'):format(stationKey, slotIndex))
-    
+
+    print(('[free-restaurants] Fire extinguished at %s slot %d (byExtinguisher: %s)'):format(
+        stationKey, slotIndex, tostring(byExtinguisher)
+    ))
+
     TriggerEvent('free-restaurants:client:fireExtinguished', {
         stationKey = stationKey,
         slotIndex = slotIndex,
     })
-    
+
     TriggerServerEvent('free-restaurants:server:fireExtinguished', {
         stationKey = stationKey,
         slotIndex = slotIndex,
     })
+
+    return true
 end
 
 -- ============================================================================
@@ -1958,7 +2044,7 @@ local function onCookingStateUpdate(data)
 
     -- Handle fire for burnt status
     if data.status == 'burnt' then
-        startFire(fullStationKey, slotIndex, data.slotCoords)
+        startFire(fullStationKey, slotIndex, data.slotCoords, data.stationType)
     elseif data.status == 'warning' then
         startParticleEffect(fullStationKey, slotIndex, 'smoke_warning', data.slotCoords)
     end
@@ -2443,6 +2529,10 @@ exports('StopAllSlotParticles', stopAllSlotParticles)
 -- Fire system
 exports('StartFire', startFire)
 exports('StopFire', stopFire)
+exports('ExtinguishFire', function(stationKey, slotIndex)
+    -- Extinguish by handheld extinguisher - may fail if fire is too large
+    return stopFire(stationKey, slotIndex, true)
+end)
 exports('GetFireState', function(stationKey, slotIndex)
     return fireState[getFireKey(stationKey, slotIndex)]
 end)
@@ -2533,6 +2623,8 @@ FreeRestaurants.Stations = {
     StopParticleEffect = stopParticleEffect,
     StartFire = startFire,
     StopFire = stopFire,
+    ExtinguishFire = function(stationKey, slotIndex) return stopFire(stationKey, slotIndex, true) end,
+    GetFireState = function(stationKey, slotIndex) return fireState[getFireKey(stationKey, slotIndex)] end,
     ShowHUD = showStationHUD,
     HideHUD = hideStationHUD,
 }

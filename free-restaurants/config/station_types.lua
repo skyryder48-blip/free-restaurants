@@ -10,10 +10,28 @@
         - particles: Cooking visual effects
         - sounds: Audio effects during cooking
         - pickup: Item pickup timing and burn/spill behavior
+        - fire: Fire behavior when items burn (for stations with canBurn = true)
+            - type: 'regular' (orange flames) or 'gas' (blue flames, more dangerous)
+            - maxChildren: 0-25, how aggressively fire spreads (0 = no spread)
+            - autoExtinguish: seconds until fire auto-extinguishes (0 = never)
+            - extinguisherEffective: seconds fire can be extinguished with handheld (0 = always)
 ]]
 
 Config = Config or {}
 Config.Stations = Config.Stations or {}
+
+-- ============================================================================
+-- GLOBAL FIRE SETTINGS
+-- ============================================================================
+
+Config.Stations.FireDefaults = {
+    type = 'regular',           -- 'regular' or 'gas'
+    maxChildren = 25,           -- Maximum fire spread (0-25)
+    autoExtinguish = 300,       -- Auto-extinguish after 5 minutes (0 = never)
+    extinguisherEffective = 60, -- Extinguisher works for first 60 seconds, then need fire dept
+    escalationTime = 15,        -- Seconds between fire escalation stages
+    spreadInterval = 10,        -- Seconds between spread attempts
+}
 
 -- ============================================================================
 -- STATION TYPE DEFINITIONS
@@ -50,6 +68,13 @@ Config.Stations.Types = {
             canSpill = false,          -- Drinks can spill
             burntItem = 'burnt_food',  -- Item given when burned (nil = item destroyed)
         },
+        -- Fire configuration when items burn
+        fire = {
+            type = 'regular',          -- 'regular' or 'gas' - grill uses regular fire
+            maxChildren = 25,          -- Aggressive spreading
+            autoExtinguish = 300,      -- 5 minutes
+            extinguisherEffective = 45,-- 45 seconds to use extinguisher before it's too big
+        },
     },
 
     -- Deep Fryer
@@ -78,6 +103,13 @@ Config.Stations.Types = {
             canSpill = false,
             burntItem = 'burnt_food',
         },
+        -- Fryer fires are VERY dangerous - oil fires
+        fire = {
+            type = 'gas',              -- Oil/grease fire - blue, spreads fast
+            maxChildren = 25,          -- Very aggressive
+            autoExtinguish = 0,        -- Oil fires don't go out on their own!
+            extinguisherEffective = 30,-- Only 30 seconds before it's out of control
+        },
     },
 
     -- Oven
@@ -105,6 +137,13 @@ Config.Stations.Types = {
             canSpill = false,
             burntItem = 'burnt_food',
         },
+        -- Oven fires are contained initially
+        fire = {
+            type = 'regular',
+            maxChildren = 15,          -- Moderate spreading (contained space)
+            autoExtinguish = 240,      -- 4 minutes
+            extinguisherEffective = 60,
+        },
     },
 
     -- Stovetop
@@ -130,6 +169,12 @@ Config.Stations.Types = {
             canBurn = true,
             canSpill = false,
             burntItem = 'burnt_food',
+        },
+        fire = {
+            type = 'regular',
+            maxChildren = 20,
+            autoExtinguish = 300,
+            extinguisherEffective = 50,
         },
     },
 
@@ -277,6 +322,13 @@ Config.Stations.Types = {
             canBurn = true,
             canSpill = false,
             burntItem = 'burnt_food',
+        },
+        -- Wood-fired pizza oven
+        fire = {
+            type = 'regular',
+            maxChildren = 20,
+            autoExtinguish = 360,      -- 6 minutes - brick retains heat
+            extinguisherEffective = 90,-- Easier to contain in brick oven
         },
     },
 
