@@ -564,25 +564,31 @@ end
 ---@param stationKey string
 ---@param slotIndex number
 ---@param effectType string Key from ParticleEffects table
----@param coords vector3
+---@param coords vector3|nil
 ---@return number|nil handle
 local function startParticleEffect(stationKey, slotIndex, effectType, coords)
+    -- Safety check for nil coords
+    if not coords then
+        FreeRestaurants.Utils.Debug(('[startParticleEffect] No coords for %s slot %d effect %s, skipping'):format(stationKey, slotIndex, effectType))
+        return nil
+    end
+
     local particleKey = getParticleKey(stationKey, slotIndex, effectType)
-    
+
     -- Stop existing effect of same type
     stopParticleEffect(stationKey, slotIndex, effectType)
-    
+
     local effect = ParticleEffects[effectType]
     if not effect then
         FreeRestaurants.Utils.Debug(('Unknown particle effect: %s'):format(effectType))
         return nil
     end
-    
+
     -- Load particle dictionary
     if not requestParticleFx(effect.dict) then
         return nil
     end
-    
+
     -- Calculate position with offset
     local effectCoords = coords + effect.offset
     
@@ -644,11 +650,17 @@ end
 ---@param slotIndex number
 ---@param status string
 ---@param stationType string
----@param coords vector3
+---@param coords vector3|nil
 local function updateCookingParticles(stationKey, slotIndex, status, stationType, coords)
     -- Stop all current particles for this slot
     stopAllSlotParticles(stationKey, slotIndex)
-    
+
+    -- Skip particle effects if no coordinates available
+    if not coords then
+        FreeRestaurants.Utils.Debug(('[updateCookingParticles] No coords for %s slot %d, skipping particles'):format(stationKey, slotIndex))
+        return
+    end
+
     -- Start appropriate particles based on status
     if status == 'cooking' then
         if stationType == 'grill' or stationType == 'stovetop' then
@@ -662,10 +674,10 @@ local function updateCookingParticles(stationKey, slotIndex, status, stationType
         else
             startParticleEffect(stationKey, slotIndex, 'steam_light', coords)
         end
-        
+
     elseif status == 'warning' then
         startParticleEffect(stationKey, slotIndex, 'smoke_warning', coords)
-        
+
     elseif status == 'burnt' then
         startParticleEffect(stationKey, slotIndex, 'smoke_burning', coords)
     end
@@ -686,12 +698,18 @@ end
 --- Start fire at a station slot
 ---@param stationKey string
 ---@param slotIndex number
----@param coords vector3
+---@param coords vector3|nil
 ---@param initialStage? number Starting fire stage (default: SMOKE_WARNING)
 local function startFire(stationKey, slotIndex, coords, initialStage)
+    -- Skip fire if no coords available
+    if not coords then
+        FreeRestaurants.Utils.Debug(('[startFire] No coords for %s slot %d, skipping fire'):format(stationKey, slotIndex))
+        return
+    end
+
     local fireKey = getFireKey(stationKey, slotIndex)
     initialStage = initialStage or FireStages.SMOKE_WARNING
-    
+
     -- Initialize fire state
     fireState[fireKey] = {
         stage = initialStage,
@@ -729,11 +747,15 @@ end
 updateFireVisuals = function(stationKey, slotIndex)
     local fireKey = getFireKey(stationKey, slotIndex)
     local state = fireState[fireKey]
-    
+
     if not state then return end
-    
+
     local coords = state.coords
-    
+    if not coords then
+        FreeRestaurants.Utils.Debug(('[updateFireVisuals] No coords for %s slot %d, skipping'):format(stationKey, slotIndex))
+        return
+    end
+
     -- Stop existing particles for this slot
     stopAllSlotParticles(stationKey, slotIndex)
     
@@ -1896,25 +1918,51 @@ local function onCookingStateUpdate(data)
     slotState.status = data.status
     slotState.progress = data.progress
     slotState.quality = data.quality
+    slotState.recipeId = data.recipeId
 
     -- Update particles based on status
     local stationTypeConfig = Config.Stations.Types[data.stationType]
     updateCookingParticles(fullStationKey, slotIndex, data.status, data.stationType, data.slotCoords)
-    
-    -- Update prop state
-    if data.status == 'cooking' and data.progress > 30 then
-        updatePropState(fullStationKey, slotIndex, 'cooking')
+
+    -- Determine the prop state based on cooking status
+    local propState = 'raw'
+    if data.status == 'cooking' then
+        propState = data.progress > 30 and 'cooking' or 'raw'
     elseif data.status == 'ready' or data.status == 'completed' then
-        updatePropState(fullStationKey, slotIndex, 'cooked')
+        propState = 'cooked'
     elseif data.status == 'burnt' then
-        updatePropState(fullStationKey, slotIndex, 'burnt')
-        -- Start fire!
+        propState = 'burnt'
+    elseif data.status == 'warning' then
+        propState = 'cooked' -- Still cooked, just warning
+    end
+
+    -- Check if prop exists, spawn if not (for syncing to other players)
+    local propKey = getPropKey(fullStationKey, slotIndex)
+    local propData = spawnedProps[propKey]
+
+    if not propData then
+        -- Prop doesn't exist - spawn it for cross-player sync
+        if data.slotCoords and data.recipeId then
+            local recipe = Config.Recipes and Config.Recipes.Items and Config.Recipes.Items[data.recipeId]
+            if recipe then
+                local propType = recipe.propType or data.recipeId
+                local heading = 0 -- Default heading, could be improved
+                spawnFoodProp(fullStationKey, slotIndex, propType, propState, data.slotCoords, heading)
+                print(('[free-restaurants] Spawned synced prop: %s at slot %d (state: %s)'):format(propType, slotIndex, propState))
+            end
+        end
+    else
+        -- Prop exists - update its state
+        updatePropState(fullStationKey, slotIndex, propState)
+    end
+
+    -- Handle fire for burnt status
+    if data.status == 'burnt' then
         startFire(fullStationKey, slotIndex, data.slotCoords)
     elseif data.status == 'warning' then
-        -- Approaching burn state
         startParticleEffect(fullStationKey, slotIndex, 'smoke_warning', data.slotCoords)
     end
-    
+
     -- Update HUD
     updateStationHUD(fullStationKey, stationSlots[fullStationKey])
 end
@@ -2164,6 +2212,28 @@ RegisterNetEvent('free-restaurants:client:syncCookingState', function(data)
     slotState.startTime = data.startTime
     slotState.endTime = data.endTime
 
+    -- Get location data by key (works for all players, not just current location)
+    local locationData = FreeRestaurants.Client.GetLocationByKey(data.locationKey)
+    local stationData = locationData and locationData.stations and locationData.stations[data.stationKey]
+    local stationType = stationData and stationData.type or 'grill'
+    local stationTypeConfig = Config.Stations and Config.Stations.Types and Config.Stations.Types[stationType]
+
+    -- Calculate slot coordinates from station config
+    local slotCoords = nil
+    if stationData and stationData.coords then
+        local stationCoords = stationData.coords
+        local stationHeading = stationData.heading or 0
+        local numSlots = stationTypeConfig and stationTypeConfig.slots or 1
+        local slotPositions = calculateSlotPositions(stationCoords, stationType, numSlots, stationHeading)
+        if slotPositions[data.slotIndex] then
+            slotCoords = slotPositions[data.slotIndex].coords
+        end
+    end
+
+    -- Store slotCoords in slot state for later use
+    slotState.slotCoords = slotCoords
+    slotState.stationType = stationType
+
     -- Trigger visual updates based on status
     if data.status == 'cooking' then
         -- Update prop to cooking state
@@ -2175,6 +2245,8 @@ RegisterNetEvent('free-restaurants:client:syncCookingState', function(data)
             progress = data.progress or 0,
             quality = data.quality or 100,
             recipeId = data.recipeId,
+            stationType = stationType,
+            slotCoords = slotCoords,
         })
 
     elseif data.status == 'ready' then
@@ -2187,39 +2259,38 @@ RegisterNetEvent('free-restaurants:client:syncCookingState', function(data)
             progress = 100,
             quality = data.quality or 100,
             recipeId = data.recipeId,
+            stationType = stationType,
+            slotCoords = slotCoords,
         })
 
-        -- Register for pickup if this has a pickup config
-        local stationData = nil
-        local location = FreeRestaurants.Client.GetCurrentLocation()
-        if location and location.stations then
-            stationData = location.stations[data.stationKey]
-        end
+        -- Always register for pickup when item is ready
+        local pendingKey = ('%s_%s_%d'):format(data.locationKey, data.stationKey, data.slotIndex)
+        local pickupConfig = stationTypeConfig and stationTypeConfig.pickup
 
-        if stationData then
-            local stationType = stationData.type or 'grill'
-            local stationTypeConfig = Config.Stations and Config.Stations.Types and Config.Stations.Types[stationType]
-            local pickupConfig = stationTypeConfig and stationTypeConfig.pickup
+        print(('[free-restaurants] syncCookingState READY: key=%s, stationType=%s, hasPickupConfig=%s'):format(
+            pendingKey, tostring(stationType), tostring(pickupConfig ~= nil)
+        ))
 
-            if pickupConfig and pickupConfig.required then
-                local pendingKey = ('%s_%s_%d'):format(data.locationKey, data.stationKey, data.slotIndex)
-                pendingPickups[pendingKey] = {
-                    locationKey = data.locationKey,
-                    stationKey = data.stationKey,
-                    slotIndex = data.slotIndex,
-                    stationType = stationType,
-                    recipeId = data.recipeId,
-                    recipeLabel = data.recipeLabel,
-                    quality = data.quality,
-                    pickupConfig = pickupConfig,
-                    createdAt = GetGameTimer(),
-                }
+        pendingPickups[pendingKey] = {
+            locationKey = data.locationKey,
+            stationKey = data.stationKey,
+            slotIndex = data.slotIndex,
+            stationType = stationType,
+            slotCoords = slotCoords,
+            recipeId = data.recipeId,
+            recipeLabel = data.recipeLabel,
+            quality = data.quality,
+            pickupConfig = pickupConfig,
+            createdAt = GetGameTimer(),
+        }
 
-                -- Start timer if there's a timeout
-                if pickupConfig.timeout and pickupConfig.timeout > 0 then
-                    startPickupTimer(pendingKey, pickupConfig)
-                end
-            end
+        print(('[free-restaurants] Registered pending pickup: %s (recipeLabel=%s)'):format(
+            pendingKey, tostring(data.recipeLabel)
+        ))
+
+        -- Start timer if pickup config requires it and has timeout
+        if pickupConfig and pickupConfig.required and pickupConfig.timeout and pickupConfig.timeout > 0 then
+            startPickupTimer(pendingKey, pickupConfig)
         end
 
     elseif data.status == 'cancelled' then
@@ -2235,6 +2306,8 @@ RegisterNetEvent('free-restaurants:client:syncCookingState', function(data)
             status = 'burnt',
             progress = 100,
             quality = 0,
+            stationType = stationType,
+            slotCoords = slotCoords,
         })
     end
 
