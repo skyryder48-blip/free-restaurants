@@ -30,7 +30,7 @@ shared_scripts {
     'config/locations.lua',
     'config/item_effects.lua',
     'config/sushi_restaurant.lua',
-    -- 'config/ordering_config.lua',  -- Embedded in sushi_restaurant.lua due to loading issue
+    'config/pos_order.lua',
 }
 
 -- Client scripts
