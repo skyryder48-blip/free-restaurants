@@ -518,6 +518,10 @@ setupOrderingTargets = function()
                     if orderingConfig then
                         print(('[free-restaurants] Setting up ordering for %s'):format(key))
 
+                        -- Capture loop variables for closures
+                        local capturedKey = key
+                        local capturedLocationData = locationData
+
                         -- Setup kiosks
                         if orderingConfig.kiosks then
                             for kioskId, kioskData in pairs(orderingConfig.kiosks) do
@@ -533,11 +537,11 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'use_kiosk',
+                                                name = targetName .. '_option',
                                                 label = kioskData.label or 'Self-Order Kiosk',
-                                                icon = 'fa-solid fa-tablet-screen-button',
+                                                icon = 'fas fa-tablet-alt',
                                                 onSelect = function()
-                                                    openKiosk(key, locationData)
+                                                    openKiosk(capturedKey, capturedLocationData)
                                                 end,
                                             },
                                         },
@@ -564,12 +568,12 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'use_register',
+                                                name = targetName .. '_option',
                                                 label = registerData.label or 'Register',
-                                                icon = 'fa-solid fa-cash-register',
+                                                icon = 'fas fa-cash-register',
                                                 groups = job and { [job] = registerData.minGrade or 0 } or nil,
                                                 onSelect = function()
-                                                    openRegister(key, locationData)
+                                                    openRegister(capturedKey, capturedLocationData)
                                                 end,
                                             },
                                         },
@@ -596,12 +600,12 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'view_kds',
+                                                name = targetName .. '_option',
                                                 label = kdsData.label or 'Kitchen Display',
-                                                icon = 'fa-solid fa-display',
+                                                icon = 'fas fa-tv',
                                                 groups = job and { [job] = kdsData.minGrade or 0 } or nil,
                                                 onSelect = function()
-                                                    openKDS(key, locationData)
+                                                    openKDS(capturedKey, capturedLocationData)
                                                 end,
                                             },
                                         },
