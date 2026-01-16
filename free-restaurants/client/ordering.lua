@@ -562,15 +562,14 @@ setupOrderingTargets = function()
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = kioskData.coords,
-                                        size = kioskData.targetSize or vec3(0.8, 0.3, 1.5),
+                                        size = kioskData.targetSize or vec3(1.0, 1.0, 2.0),
                                         rotation = kioskData.heading or 0,
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'use_kiosk_' .. targetName,
+                                                name = 'kiosk_order',
                                                 label = kioskData.label or 'Self-Order Kiosk',
                                                 icon = 'fa-solid fa-tablet',
-                                                distance = 2.0,
                                                 onSelect = function()
                                                     print('[free-restaurants] Kiosk selected: ' .. kioskKey)
                                                     openKiosk(kioskKey, kioskLocData)
@@ -599,15 +598,14 @@ setupOrderingTargets = function()
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = registerData.coords,
-                                        size = registerData.targetSize or vec3(0.6, 0.4, 0.5),
+                                        size = registerData.targetSize or vec3(1.0, 1.0, 1.5),
                                         rotation = registerData.heading or 0,
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'use_register_' .. targetName,
+                                                name = 'register_use',
                                                 label = registerData.label or 'Register',
                                                 icon = 'fa-solid fa-cash-register',
-                                                distance = 2.0,
                                                 groups = job and { [job] = registerData.minGrade or 0 } or nil,
                                                 onSelect = function()
                                                     print('[free-restaurants] Register selected: ' .. regKey)
@@ -637,15 +635,14 @@ setupOrderingTargets = function()
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = kdsData.coords,
-                                        size = kdsData.targetSize or vec3(0.8, 0.1, 0.6),
+                                        size = kdsData.targetSize or vec3(1.0, 0.5, 1.0),
                                         rotation = kdsData.heading or 0,
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'view_kds_' .. targetName,
+                                                name = 'kds_view',
                                                 label = kdsData.label or 'Kitchen Display',
                                                 icon = 'fa-solid fa-tv',
-                                                distance = 2.0,
                                                 groups = job and { [job] = kdsData.minGrade or 0 } or nil,
                                                 onSelect = function()
                                                     print('[free-restaurants] KDS selected: ' .. kdsKey)
@@ -671,10 +668,9 @@ setupOrderingTargets = function()
                                 debug = Config.Debug,
                                 options = {
                                     {
-                                        name = 'pickup_order_' .. targetName,
+                                        name = 'order_pickup',
                                         label = pickupData.label or 'Pickup Order',
                                         icon = 'fa-solid fa-hand-holding',
-                                        distance = 2.0,
                                         onSelect = function()
                                             checkOrderPickup(capturedKey)
                                         end,
