@@ -74,28 +74,53 @@ local function getLocationMenu(locationData)
     local seenCategories = {}
     local restaurantType = locationData.restaurantType
 
-    for recipeId, recipeData in pairs(Config.Recipes or {}) do
-        if recipeData.restaurantType == restaurantType or recipeData.restaurantType == 'all' then
-            if recipeData.sellable ~= false then
-                table.insert(menu, {
-                    id = recipeId,
-                    label = recipeData.label,
-                    description = recipeData.description or '',
-                    price = recipeData.price or 0,
-                    category = recipeData.category or 'Other',
-                    icon = recipeData.icon,
-                    customizations = recipeData.customizations,
-                })
+    -- Recipes are stored in Config.Recipes.Items, not Config.Recipes directly
+    local recipesTable = Config.Recipes and Config.Recipes.Items or {}
 
-                if not seenCategories[recipeData.category] then
-                    seenCategories[recipeData.category] = true
-                    table.insert(categories, recipeData.category)
+    for recipeId, recipeData in pairs(recipesTable) do
+        -- Check if recipe belongs to this restaurant type
+        -- Recipes use 'restaurantTypes' (plural array), not 'restaurantType' (singular)
+        local matchesType = false
+        if recipeData.restaurantTypes then
+            for _, rType in ipairs(recipeData.restaurantTypes) do
+                if rType == restaurantType or rType == 'all' then
+                    matchesType = true
+                    break
                 end
+            end
+        end
+
+        if matchesType and recipeData.sellable ~= false then
+            -- Get first category from categories array, or use 'Other'
+            local category = 'Other'
+            if recipeData.categories and #recipeData.categories > 0 then
+                category = recipeData.categories[1]
+            end
+
+            table.insert(menu, {
+                id = recipeId,
+                label = recipeData.label,
+                description = recipeData.description or '',
+                price = recipeData.basePrice or recipeData.price or 0,  -- Use basePrice (recipes use this)
+                category = category,
+                icon = recipeData.icon,
+                customizations = recipeData.customizations,
+            })
+
+            if not seenCategories[category] then
+                seenCategories[category] = true
+                table.insert(categories, category)
             end
         end
     end
 
     table.sort(categories)
+
+    if Config.Debug then
+        print(('[free-restaurants] getLocationMenu for %s: found %d items in %d categories'):format(
+            restaurantType or 'unknown', #menu, #categories
+        ))
+    end
 
     return menu, categories
 end
