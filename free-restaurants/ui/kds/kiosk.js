@@ -24,6 +24,28 @@
     // DOM Elements
     let elements = {};
 
+    // Forward declaration of hide function (used before window.Kiosk is defined)
+    function hide() {
+        state.visible = false;
+        if (elements.container) {
+            elements.container.classList.add('hidden');
+        }
+        closeItemModal();
+        closePaymentModal();
+    }
+
+    // Forward declarations for modal close functions
+    function closeItemModal() {
+        const modal = document.getElementById('item-detail-modal');
+        if (modal) modal.remove();
+        state.selectedItem = null;
+    }
+
+    function closePaymentModal() {
+        const modal = document.getElementById('payment-modal');
+        if (modal) modal.remove();
+    }
+
     // Category Icons
     const categoryIcons = {
         'Burgers': '\uD83C\uDF54',
@@ -242,13 +264,6 @@
         });
     }
 
-    // Close item modal
-    function closeItemModal() {
-        const modal = document.getElementById('item-detail-modal');
-        if (modal) modal.remove();
-        state.selectedItem = null;
-    }
-
     // Add to cart
     function addToCart(item, qty, mods) {
         // Check if same item (without mods) exists
@@ -436,12 +451,6 @@
         });
     }
 
-    // Close payment modal
-    function closePaymentModal() {
-        const modal = document.getElementById('payment-modal');
-        if (modal) modal.remove();
-    }
-
     // Place order
     function placeOrder(paymentMethod) {
         const { subtotal, tax, total } = calculateTotals();
@@ -502,14 +511,7 @@
             renderCart();
         },
 
-        hide: function() {
-            state.visible = false;
-            if (elements.container) {
-                elements.container.classList.add('hidden');
-            }
-            closeItemModal();
-            closePaymentModal();
-        },
+        hide: hide,
 
         setMenu: function(menu, categories) {
             state.menu = menu || [];
