@@ -85,16 +85,24 @@ end
 ---@return number total
 local function calculateOrderTotal(job, items)
     local subtotal = 0
-    
+
     for _, item in ipairs(items) do
-        local price = getItemPrice(job, item.id or item.item)
-        subtotal = subtotal + (price * (item.amount or item.quantity or 1))
+        local itemId = item.id or item.item
+        local price = getItemPrice(job, itemId)
+        local amount = item.amount or item.quantity or 1
+        local itemTotal = price * amount
+
+        print(('[free-restaurants] calculateOrderTotal: itemId=%s, price=%d, amount=%d, itemTotal=%d'):format(
+            itemId or 'nil', price or 0, amount, itemTotal
+        ))
+
+        subtotal = subtotal + itemTotal
     end
-    
+
     local taxRate = Config.Settings and Config.Settings.Economy and Config.Settings.Economy.taxRate or 0
     local tax = math.floor(subtotal * taxRate)
     local total = subtotal + tax
-    
+
     return subtotal, tax, total
 end
 
@@ -113,14 +121,24 @@ end
 local function createOrder(customerSource, job, locationKey, items, paymentMethod)
     local customer = exports.qbx_core:GetPlayer(customerSource)
     if not customer then return nil, 'Invalid customer' end
-    
+
     -- Calculate total
     local subtotal, tax, total = calculateOrderTotal(job, items)
-    
+
+    print(('[free-restaurants] createOrder: job=%s, subtotal=%d, tax=%d, total=%d'):format(
+        job or 'nil', subtotal or 0, tax or 0, total or 0
+    ))
+
     -- Validate payment
     local moneyType = paymentMethod == 'cash' and 'cash' or 'bank'
-    if customer.PlayerData.money[moneyType] < total then
-        return nil, 'Insufficient funds'
+    local customerMoney = customer.PlayerData.money[moneyType] or 0
+
+    print(('[free-restaurants] createOrder: paymentMethod=%s, moneyType=%s, customerMoney=%d, total=%d'):format(
+        paymentMethod or 'nil', moneyType, customerMoney, total or 0
+    ))
+
+    if customerMoney < total then
+        return nil, ('Insufficient funds (has $%d, needs $%d)'):format(customerMoney, total)
     end
     
     -- Generate order ID
@@ -180,11 +198,32 @@ local function createOrder(customerSource, job, locationKey, items, paymentMetho
     
     -- Notify restaurant staff
     notifyStaff(job, 'new_order', orderData)
-    
+
+    -- Give customer a receipt item with order metadata
+    local receiptMetadata = {
+        orderId = orderId,
+        restaurant = job,
+        locationKey = locationKey,
+        customerName = orderData.customerName,
+        items = items,
+        subtotal = subtotal,
+        tax = tax,
+        total = total,
+        paymentMethod = paymentMethod,
+        timestamp = os.time(),
+        description = ('Order #%s - $%d'):format(orderId, total),
+    }
+
+    -- Try to give receipt item (won't error if item doesn't exist)
+    local receiptGiven = exports.ox_inventory:AddItem(customerSource, 'restaurant_receipt', 1, receiptMetadata)
+    if receiptGiven then
+        print(('[free-restaurants] Receipt given to customer for order #%s'):format(orderId))
+    end
+
     print(('[free-restaurants] New order #%s from %s at %s (total: %d)'):format(
         orderId, customer.PlayerData.citizenid, job, total
     ))
-    
+
     return orderId, nil
 end
 
@@ -698,8 +737,34 @@ RegisterNetEvent('free-restaurants:server:openPickupStash', function(locationKey
     local job = player.PlayerData.job.name
     local stashId = getPickupStashId(job, locationKey)
 
-    -- Register stash if not already registered
+    -- Register stash if not already registered (staff access)
     exports.ox_inventory:RegisterStash(stashId, 'Order Pickup', 20, 50000, nil, { [job] = 0 })
+
+    -- Open the stash
+    exports.ox_inventory:forceOpenInventory(source, 'stash', stashId)
+end)
+
+--- Open pickup stash for customers (no job restriction)
+RegisterNetEvent('free-restaurants:server:openCustomerPickupStash', function(locationKey)
+    local source = source
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return end
+
+    -- Get job from location key
+    local job = locationKey:match('^([^_]+)')
+    if not job then
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Error',
+            description = 'Invalid pickup location.',
+            type = 'error',
+        })
+        return
+    end
+
+    local stashId = getPickupStashId(job, locationKey)
+
+    -- Register stash without job restrictions for customer access
+    exports.ox_inventory:RegisterStash(stashId, 'Order Pickup', 20, 50000)
 
     -- Open the stash
     exports.ox_inventory:forceOpenInventory(source, 'stash', stashId)
