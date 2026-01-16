@@ -92,23 +92,15 @@ end
 ---@param locationKey string
 ---@param locationData table
 openKiosk = function(locationKey, locationData)
-    print('[free-restaurants] openKiosk called for: ' .. tostring(locationKey))
-
-    if kioskVisible then
-        print('[free-restaurants] Kiosk already visible, returning')
-        return
-    end
+    if kioskVisible then return end
 
     currentLocation = locationKey
     kioskVisible = true
 
     local menu, categories = getLocationMenu(locationData)
-    print(('[free-restaurants] Menu items: %d, Categories: %d'):format(#menu, #categories))
 
-    print('[free-restaurants] Setting NUI focus...')
     SetNuiFocus(true, true)
 
-    print('[free-restaurants] Sending kiosk:show NUI message...')
     SendNUIMessage({
         type = 'kiosk:show',
         data = {
@@ -119,7 +111,6 @@ openKiosk = function(locationKey, locationData)
             taxRate = getTaxRate(),
         }
     })
-    print('[free-restaurants] kiosk:show message sent')
 end
 
 --- Close kiosk interface
@@ -510,23 +501,6 @@ setupOrderingTargets = function()
         return
     end
 
-    print('[free-restaurants] Config.Ordering exists, checking locations...')
-
-    -- Debug: count locations
-    local locationCount = 0
-    for restaurantType, locations in pairs(Config.Locations) do
-        if type(locations) == 'table' and restaurantType ~= 'Settings' then
-            for locationId, locationData in pairs(locations) do
-                if type(locationData) == 'table' then
-                    locationCount = locationCount + 1
-                    print(('[free-restaurants] Found location: %s_%s (enabled: %s)'):format(
-                        restaurantType, locationId, tostring(locationData.enabled)))
-                end
-            end
-        end
-    end
-    print(('[free-restaurants] Total locations found: %d'):format(locationCount))
-
     for restaurantType, locations in pairs(Config.Locations) do
         if type(locations) == 'table' and restaurantType ~= 'Settings' then
             for locationId, locationData in pairs(locations) do
@@ -562,14 +536,15 @@ setupOrderingTargets = function()
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = kioskData.coords,
-                                        size = kioskData.targetSize or vec3(1.0, 1.0, 2.0),
+                                        size = kioskData.targetSize or vec3(0.8, 0.3, 1.5),
                                         rotation = kioskData.heading or 0,
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'kiosk_order',
+                                                name = 'use_kiosk_' .. targetName,
                                                 label = kioskData.label or 'Self-Order Kiosk',
                                                 icon = 'fa-solid fa-tablet',
+                                                distance = 2.0,
                                                 onSelect = function()
                                                     print('[free-restaurants] Kiosk selected: ' .. kioskKey)
                                                     openKiosk(kioskKey, kioskLocData)
@@ -598,14 +573,15 @@ setupOrderingTargets = function()
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = registerData.coords,
-                                        size = registerData.targetSize or vec3(1.0, 1.0, 1.5),
+                                        size = registerData.targetSize or vec3(0.6, 0.4, 0.5),
                                         rotation = registerData.heading or 0,
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'register_use',
+                                                name = 'use_register_' .. targetName,
                                                 label = registerData.label or 'Register',
                                                 icon = 'fa-solid fa-cash-register',
+                                                distance = 2.0,
                                                 groups = job and { [job] = registerData.minGrade or 0 } or nil,
                                                 onSelect = function()
                                                     print('[free-restaurants] Register selected: ' .. regKey)
@@ -635,14 +611,15 @@ setupOrderingTargets = function()
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = kdsData.coords,
-                                        size = kdsData.targetSize or vec3(1.0, 0.5, 1.0),
+                                        size = kdsData.targetSize or vec3(0.8, 0.1, 0.6),
                                         rotation = kdsData.heading or 0,
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'kds_view',
+                                                name = 'view_kds_' .. targetName,
                                                 label = kdsData.label or 'Kitchen Display',
                                                 icon = 'fa-solid fa-tv',
+                                                distance = 2.0,
                                                 groups = job and { [job] = kdsData.minGrade or 0 } or nil,
                                                 onSelect = function()
                                                     print('[free-restaurants] KDS selected: ' .. kdsKey)
@@ -668,9 +645,10 @@ setupOrderingTargets = function()
                                 debug = Config.Debug,
                                 options = {
                                     {
-                                        name = 'order_pickup',
+                                        name = 'pickup_order_' .. targetName,
                                         label = pickupData.label or 'Pickup Order',
                                         icon = 'fa-solid fa-hand-holding',
+                                        distance = 2.0,
                                         onSelect = function()
                                             checkOrderPickup(capturedKey)
                                         end,
@@ -855,27 +833,6 @@ AddEventHandler('onResourceStop', function(resourceName)
     -- Close any open UIs
     if kdsVisible then closeKDS() end
     if kioskVisible then closeKiosk() end
-end)
-
---- ESC key handler to close kiosk/KDS when NUI focus is active
---- This serves as a backup if the NUI JS escape handler fails
-CreateThread(function()
-    while true do
-        Wait(0)
-        if kioskVisible or kdsVisible then
-            if IsControlJustPressed(0, 200) then -- ESC key
-                print('[free-restaurants] ESC pressed - closing UI')
-                if kioskVisible then
-                    closeKiosk()
-                end
-                if kdsVisible then
-                    closeKDS()
-                end
-            end
-        else
-            Wait(500) -- Reduce CPU when not active
-        end
-    end
 end)
 
 -- ============================================================================
