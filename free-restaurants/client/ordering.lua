@@ -544,7 +544,9 @@ setupOrderingTargets = function()
                                                 name = 'use_kiosk_' .. targetName,
                                                 label = kioskData.label or 'Self-Order Kiosk',
                                                 icon = 'fa-solid fa-tablet',
-                                                distance = 2.0,
+                                                canInteract = function()
+                                                    return true
+                                                end,
                                                 onSelect = function()
                                                     print('[free-restaurants] Kiosk selected: ' .. kioskKey)
                                                     openKiosk(kioskKey, kioskLocData)
