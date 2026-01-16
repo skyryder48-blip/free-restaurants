@@ -510,6 +510,23 @@ setupOrderingTargets = function()
         return
     end
 
+    print('[free-restaurants] Config.Ordering exists, checking locations...')
+
+    -- Debug: count locations
+    local locationCount = 0
+    for restaurantType, locations in pairs(Config.Locations) do
+        if type(locations) == 'table' and restaurantType ~= 'Settings' then
+            for locationId, locationData in pairs(locations) do
+                if type(locationData) == 'table' then
+                    locationCount = locationCount + 1
+                    print(('[free-restaurants] Found location: %s_%s (enabled: %s)'):format(
+                        restaurantType, locationId, tostring(locationData.enabled)))
+                end
+            end
+        end
+    end
+    print(('[free-restaurants] Total locations found: %d'):format(locationCount))
+
     for restaurantType, locations in pairs(Config.Locations) do
         if type(locations) == 'table' and restaurantType ~= 'Settings' then
             for locationId, locationData in pairs(locations) do
