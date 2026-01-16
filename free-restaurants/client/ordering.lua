@@ -569,6 +569,9 @@ setupOrderingTargets = function()
                                                 name = 'use_kiosk_' .. targetName,
                                                 label = kioskData.label or 'Self-Order Kiosk',
                                                 icon = 'fa-solid fa-tablet',
+                                                canInteract = function()
+                                                    return true
+                                                end,
                                                 onSelect = function()
                                                     print('[free-restaurants] Kiosk selected: ' .. kioskKey)
                                                     openKiosk(kioskKey, kioskLocData)
@@ -607,6 +610,9 @@ setupOrderingTargets = function()
                                                 label = registerData.label or 'Register',
                                                 icon = 'fa-solid fa-cash-register',
                                                 groups = job and { [job] = registerData.minGrade or 0 } or nil,
+                                                canInteract = function()
+                                                    return true
+                                                end,
                                                 onSelect = function()
                                                     print('[free-restaurants] Register selected: ' .. regKey)
                                                     openRegister(regKey, regLocData)
@@ -645,6 +651,9 @@ setupOrderingTargets = function()
                                                 label = kdsData.label or 'Kitchen Display',
                                                 icon = 'fa-solid fa-tv',
                                                 groups = job and { [job] = kdsData.minGrade or 0 } or nil,
+                                                canInteract = function()
+                                                    return true
+                                                end,
                                                 onSelect = function()
                                                     print('[free-restaurants] KDS selected: ' .. kdsKey)
                                                     openKDS(kdsKey, kdsLocData)
@@ -674,6 +683,9 @@ setupOrderingTargets = function()
                                         name = 'pickup_order_' .. targetName,
                                         label = pickupData.label or 'Pickup Order',
                                         icon = 'fa-solid fa-hand-holding',
+                                        canInteract = function()
+                                            return true
+                                        end,
                                         onSelect = function()
                                             checkOrderPickup(capturedKey)
                                         end,
