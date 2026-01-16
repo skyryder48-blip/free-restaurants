@@ -541,9 +541,10 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'use_kiosk',
+                                                name = 'use_kiosk_' .. targetName,
                                                 label = kioskData.label or 'Self-Order Kiosk',
                                                 icon = 'fa-solid fa-tablet',
+                                                distance = 2.0,
                                                 onSelect = function()
                                                     print('[free-restaurants] Kiosk selected: ' .. kioskKey)
                                                     openKiosk(kioskKey, kioskLocData)
@@ -577,9 +578,10 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'use_register',
+                                                name = 'use_register_' .. targetName,
                                                 label = registerData.label or 'Register',
                                                 icon = 'fa-solid fa-cash-register',
+                                                distance = 2.0,
                                                 groups = job and { [job] = registerData.minGrade or 0 } or nil,
                                                 onSelect = function()
                                                     print('[free-restaurants] Register selected: ' .. regKey)
@@ -614,9 +616,10 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = 'view_kds',
+                                                name = 'view_kds_' .. targetName,
                                                 label = kdsData.label or 'Kitchen Display',
                                                 icon = 'fa-solid fa-tv',
+                                                distance = 2.0,
                                                 groups = job and { [job] = kdsData.minGrade or 0 } or nil,
                                                 onSelect = function()
                                                     print('[free-restaurants] KDS selected: ' .. kdsKey)
@@ -642,11 +645,12 @@ setupOrderingTargets = function()
                                 debug = Config.Debug,
                                 options = {
                                     {
-                                        name = 'pickup_order',
+                                        name = 'pickup_order_' .. targetName,
                                         label = pickupData.label or 'Pickup Order',
                                         icon = 'fa-solid fa-hand-holding',
+                                        distance = 2.0,
                                         onSelect = function()
-                                            checkOrderPickup(key)
+                                            checkOrderPickup(capturedKey)
                                         end,
                                     },
                                 },
