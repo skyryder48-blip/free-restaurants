@@ -10,12 +10,27 @@
 
     DEPENDENCIES:
     - client/main.lua (state management)
-    - config/ordering.lua (ordering configurations)
+    - config/pos_order.lua (ordering configurations)
     - ox_lib (UI components)
     - ox_target (interaction zones)
 ]]
 
 print('[free-restaurants] Loading client/ordering.lua...')
+
+-- Verify Config.Ordering is available from pos_order.lua
+if Config and Config.Ordering then
+    print('[free-restaurants] Config.Ordering loaded successfully from pos_order.lua')
+    -- Debug: show available restaurant types
+    local types = {}
+    for k, v in pairs(Config.Ordering) do
+        if type(v) == 'table' and k ~= 'Settings' and k ~= 'KDSProps' and k ~= 'DefaultTemplate' and k ~= 'ReceiptTemplate' then
+            table.insert(types, k)
+        end
+    end
+    print(('[free-restaurants] Available ordering configs: %s'):format(table.concat(types, ', ')))
+else
+    print('[free-restaurants] WARNING: Config.Ordering not found - check pos_order.lua loading')
+end
 
 -- ============================================================================
 -- LOCAL STATE
