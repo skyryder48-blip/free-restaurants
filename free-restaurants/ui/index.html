@@ -245,19 +245,28 @@
             }
         });
 
+        // Get resource name once at initialization (before we might shadow the native)
+        // FiveM provides GetParentResourceName as a native function
+        const _resourceName = (function() {
+            // Check if FiveM's native exists (it won't be our function yet)
+            if (typeof GetParentResourceName === 'function') {
+                try {
+                    return GetParentResourceName();
+                } catch (e) {
+                    return 'free-restaurants';
+                }
+            }
+            return 'free-restaurants';
+        })();
+
         // NUI callback helper
         window.postNUI = function(action, data) {
-            return fetch(`https://${GetParentResourceName()}/${action}`, {
+            return fetch(`https://${_resourceName}/${action}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data || {}),
             }).catch(() => {});
         };
-
-        // Get parent resource name
-        function GetParentResourceName() {
-            return window.GetParentResourceName ? window.GetParentResourceName() : 'free-restaurants';
-        }
     </script>
 </body>
 </html>
