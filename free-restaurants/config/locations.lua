@@ -305,8 +305,15 @@ Config.Locations['burgershot'] = {
             { type = 'dishes', coords = vec3(-1198.89, -903.45, 14.75) },
         },
         
-        -- Delivery Spawn Points
+        -- Delivery System
         delivery = {
+            -- Delivery board interaction point (where employees start deliveries)
+            board = {
+                coords = vec3(-1194.67, -899.71, 14.75),  -- Near packaging station
+                heading = 215.0,
+                targetSize = vec3(1.0, 1.0, 2.0),
+                label = 'Delivery Board',
+            },
             vehicleSpawn = {
                 coords = vec3(-1185.67, -907.89, 13.98),
                 heading = 305.0,
@@ -466,6 +473,13 @@ Config.Locations['burgershot'] = {
         },
         
         delivery = {
+            -- Delivery board interaction point
+            board = {
+                coords = vec3(-1526.89, -894.12, 10.21),  -- Near packaging station
+                heading = 220.0,
+                targetSize = vec3(1.0, 1.0, 2.0),
+                label = 'Delivery Board',
+            },
             vehicleSpawn = {
                 coords = vec3(-1515.67, -879.34, 10.21),
                 heading = 130.0,
@@ -474,11 +488,11 @@ Config.Locations['burgershot'] = {
                 coords = vec3(-1530.89, -893.45, 10.21),
             },
         },
-        
+
         breakRoom = {
             enabled = false,
         },
-        
+
         restrooms = {},
     },
 }
@@ -684,6 +698,13 @@ Config.Locations['pizzathis'] = {
         },
         
         delivery = {
+            -- Delivery board interaction point
+            board = {
+                coords = vec3(1175.34, -321.23, 69.21),  -- Near pizza boxes/packaging
+                heading = 10.0,
+                targetSize = vec3(1.0, 1.0, 2.0),
+                label = 'Delivery Board',
+            },
             vehicleSpawn = {
                 coords = vec3(1155.67, -335.89, 69.21),
                 heading = 280.0,
@@ -692,7 +713,7 @@ Config.Locations['pizzathis'] = {
                 coords = vec3(1169.45, -323.67, 69.21),
             },
         },
-        
+
         breakRoom = {
             enabled = true,
             coords = vec3(1159.67, -314.23, 69.21),
@@ -836,6 +857,13 @@ Config.Locations['pizzathis'] = {
         },
         
         delivery = {
+            -- Delivery board interaction point
+            board = {
+                coords = vec3(-758.45, -754.89, 26.33),  -- Near packaging station
+                heading = 0.0,
+                targetSize = vec3(1.0, 1.0, 2.0),
+                label = 'Delivery Board',
+            },
             vehicleSpawn = {
                 coords = vec3(-750.67, -762.34, 26.33),
                 heading = 90.0,
@@ -844,7 +872,7 @@ Config.Locations['pizzathis'] = {
                 coords = vec3(-761.45, -756.67, 26.33),
             },
         },
-        
+
         breakRoom = { enabled = false },
         restrooms = {},
     },
@@ -1032,6 +1060,13 @@ Config.Locations['beanmachine'] = {
         },
         
         delivery = {
+            -- Delivery board interaction point
+            board = {
+                coords = vec3(-633.34, -225.67, 38.06),  -- Near order pickup/plating
+                heading = 120.0,
+                targetSize = vec3(1.0, 1.0, 2.0),
+                label = 'Delivery Board',
+            },
             vehicleSpawn = {
                 coords = vec3(-620.67, -235.89, 38.06),
                 heading = 120.0,
@@ -1040,7 +1075,7 @@ Config.Locations['beanmachine'] = {
                 coords = vec3(-634.23, -227.67, 38.06),
             },
         },
-        
+
         breakRoom = {
             enabled = true,
             coords = vec3(-644.89, -230.23, 38.06),
@@ -1177,6 +1212,13 @@ Config.Locations['beanmachine'] = {
         },
         
         delivery = {
+            -- Delivery board interaction point
+            board = {
+                coords = vec3(-1705.12, -287.89, 46.95),  -- Near pickup/plating
+                heading = 140.0,
+                targetSize = vec3(1.0, 1.0, 2.0),
+                label = 'Delivery Board',
+            },
             vehicleSpawn = {
                 coords = vec3(-1695.67, -280.89, 46.95),
                 heading = 140.0,
@@ -1185,7 +1227,7 @@ Config.Locations['beanmachine'] = {
                 coords = vec3(-1707.45, -287.67, 46.95),
             },
         },
-        
+
         breakRoom = { enabled = false },
         restrooms = {},
     },
@@ -1399,6 +1441,13 @@ Config.Locations['tequilala'] = {
         },
         
         delivery = {
+            -- Delivery board interaction point
+            board = {
+                coords = vec3(-571.23, 275.34, 83.12),  -- Near bar food prep area
+                heading = 265.0,
+                targetSize = vec3(1.0, 1.0, 2.0),
+                label = 'Delivery Board',
+            },
             vehicleSpawn = {
                 coords = vec3(-545.67, 290.89, 83.12),
                 heading = 265.0,
@@ -1407,7 +1456,7 @@ Config.Locations['tequilala'] = {
                 coords = vec3(-565.34, 276.89, 83.12),
             },
         },
-        
+
         breakRoom = {
             enabled = true,
             coords = vec3(-579.45, 263.67, 83.12),
@@ -1639,6 +1688,13 @@ Config.Locations['tacofarmer'] = {
         },
 
         delivery = {
+            -- Delivery board interaction point
+            board = {
+                coords = vec3(13.0, -1599.0, 29.4),  -- Near packaging/order pickup
+                heading = 50.0,
+                targetSize = vec3(1.0, 1.0, 2.0),
+                label = 'Delivery Board',
+            },
             vehicleSpawn = {
                 coords = vec3(25.0, -1595.0, 29.4),
                 heading = 140.0,
