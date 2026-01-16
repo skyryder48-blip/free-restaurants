@@ -92,15 +92,23 @@ end
 ---@param locationKey string
 ---@param locationData table
 openKiosk = function(locationKey, locationData)
-    if kioskVisible then return end
+    print('[free-restaurants] openKiosk called for: ' .. tostring(locationKey))
+
+    if kioskVisible then
+        print('[free-restaurants] Kiosk already visible, returning')
+        return
+    end
 
     currentLocation = locationKey
     kioskVisible = true
 
     local menu, categories = getLocationMenu(locationData)
+    print(('[free-restaurants] Menu items: %d, Categories: %d'):format(#menu, #categories))
 
+    print('[free-restaurants] Setting NUI focus...')
     SetNuiFocus(true, true)
 
+    print('[free-restaurants] Sending kiosk:show NUI message...')
     SendNUIMessage({
         type = 'kiosk:show',
         data = {
@@ -111,6 +119,7 @@ openKiosk = function(locationKey, locationData)
             taxRate = getTaxRate(),
         }
     })
+    print('[free-restaurants] kiosk:show message sent')
 end
 
 --- Close kiosk interface
@@ -833,6 +842,27 @@ AddEventHandler('onResourceStop', function(resourceName)
     -- Close any open UIs
     if kdsVisible then closeKDS() end
     if kioskVisible then closeKiosk() end
+end)
+
+--- ESC key handler to close kiosk/KDS when NUI focus is active
+--- This serves as a backup if the NUI JS escape handler fails
+CreateThread(function()
+    while true do
+        Wait(0)
+        if kioskVisible or kdsVisible then
+            if IsControlJustPressed(0, 200) then -- ESC key
+                print('[free-restaurants] ESC pressed - closing UI')
+                if kioskVisible then
+                    closeKiosk()
+                end
+                if kdsVisible then
+                    closeKDS()
+                end
+            end
+        else
+            Wait(500) -- Reduce CPU when not active
+        end
+    end
 end)
 
 -- ============================================================================

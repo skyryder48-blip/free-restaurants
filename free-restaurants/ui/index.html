@@ -158,54 +158,81 @@
 
     <!-- Main NUI controller -->
     <script>
+        // Debug helper
+        function nuiDebug(msg) {
+            console.log('[NUI] ' + msg);
+        }
+
+        nuiDebug('NUI script loaded');
+
         // Global message router
         window.addEventListener('message', function(event) {
-            const { type, data } = event.data;
+            try {
+                const { type, data } = event.data;
 
-            // Route messages to appropriate components
-            switch (type) {
-                case 'setVisible':
-                    document.body.style.display = data.visible ? 'block' : 'none';
-                    break;
+                nuiDebug('Message received: ' + type);
 
-                // KDS Messages
-                case 'kds:show':
-                    if (window.KDS) window.KDS.show(data);
-                    break;
-                case 'kds:hide':
-                    if (window.KDS) window.KDS.hide();
-                    break;
-                case 'kds:update':
-                    if (window.KDS) window.KDS.updateOrders(data.orders);
-                    break;
-                case 'kds:newOrder':
-                    if (window.KDS) window.KDS.addOrder(data.order);
-                    break;
-                case 'kds:orderUpdate':
-                    if (window.KDS) window.KDS.updateOrder(data.orderId, data.status);
-                    break;
-                case 'kds:removeOrder':
-                    if (window.KDS) window.KDS.removeOrder(data.orderId);
-                    break;
+                // Route messages to appropriate components
+                switch (type) {
+                    case 'setVisible':
+                        document.body.style.display = data.visible ? 'block' : 'none';
+                        break;
 
-                // Kiosk Messages
-                case 'kiosk:show':
-                    if (window.Kiosk) window.Kiosk.show(data);
-                    break;
-                case 'kiosk:hide':
-                    if (window.Kiosk) window.Kiosk.hide();
-                    break;
-                case 'kiosk:setMenu':
-                    if (window.Kiosk) window.Kiosk.setMenu(data.menu, data.categories);
-                    break;
+                    // KDS Messages
+                    case 'kds:show':
+                        nuiDebug('KDS show - window.KDS exists: ' + !!window.KDS);
+                        if (window.KDS) window.KDS.show(data);
+                        break;
+                    case 'kds:hide':
+                        if (window.KDS) window.KDS.hide();
+                        break;
+                    case 'kds:update':
+                        if (window.KDS) window.KDS.updateOrders(data.orders);
+                        break;
+                    case 'kds:newOrder':
+                        if (window.KDS) window.KDS.addOrder(data.order);
+                        break;
+                    case 'kds:orderUpdate':
+                        if (window.KDS) window.KDS.updateOrder(data.orderId, data.status);
+                        break;
+                    case 'kds:removeOrder':
+                        if (window.KDS) window.KDS.removeOrder(data.orderId);
+                        break;
 
-                // Receipt Messages
-                case 'receipt:show':
-                    if (window.Receipt) window.Receipt.show(data);
-                    break;
-                case 'receipt:hide':
-                    if (window.Receipt) window.Receipt.hide();
-                    break;
+                    // Kiosk Messages
+                    case 'kiosk:show':
+                        nuiDebug('Kiosk show - window.Kiosk exists: ' + !!window.Kiosk);
+                        if (window.Kiosk) {
+                            nuiDebug('Calling Kiosk.show()');
+                            window.Kiosk.show(data);
+                            nuiDebug('Kiosk.show() completed');
+                        } else {
+                            nuiDebug('ERROR: window.Kiosk is undefined!');
+                            // Fallback: try to show container directly
+                            var container = document.getElementById('kiosk-container');
+                            if (container) {
+                                nuiDebug('Fallback: removing hidden class directly');
+                                container.classList.remove('hidden');
+                            }
+                        }
+                        break;
+                    case 'kiosk:hide':
+                        if (window.Kiosk) window.Kiosk.hide();
+                        break;
+                    case 'kiosk:setMenu':
+                        if (window.Kiosk) window.Kiosk.setMenu(data.menu, data.categories);
+                        break;
+
+                    // Receipt Messages
+                    case 'receipt:show':
+                        if (window.Receipt) window.Receipt.show(data);
+                        break;
+                    case 'receipt:hide':
+                        if (window.Receipt) window.Receipt.hide();
+                        break;
+                }
+            } catch (err) {
+                console.error('[NUI] Error handling message:', err);
             }
         });
 
