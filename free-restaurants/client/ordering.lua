@@ -757,7 +757,7 @@ checkOrderPickup = function(locationKey)
         return
     end
 
-    local success = lib.callback.await('free-restaurants:server:pickupOrder', false, myOrder.id)
+    local success, errorMsg = lib.callback.await('free-restaurants:server:pickupOrder', false, myOrder.id)
 
     if success then
         lib.notify({
@@ -769,7 +769,7 @@ checkOrderPickup = function(locationKey)
     else
         lib.notify({
             title = 'Pickup Failed',
-            description = 'Could not pickup your order.',
+            description = errorMsg or 'Could not pickup your order.',
             type = 'error',
         })
     end

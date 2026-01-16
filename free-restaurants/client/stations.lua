@@ -1286,7 +1286,22 @@ local function createStationTargets(locationKey, stationKey, stationData, statio
             showStationHUD(fullStationKey, stationData.type, numSlots)
         end,
     })
-    
+
+    -- Add pickup stash option for packaging stations
+    if stationData.type == 'packaging_station' then
+        table.insert(targetOptions, {
+            name = ('%s_pickup_stash'):format(fullStationKey),
+            label = 'Open Pickup Area',
+            icon = 'fa-solid fa-box-open',
+            canInteract = function()
+                return FreeRestaurants.Client.IsOnDuty()
+            end,
+            onSelect = function()
+                TriggerServerEvent('free-restaurants:server:openPickupStash', locationKey)
+            end,
+        })
+    end
+
     -- Register the target zone
     exports.ox_target:addBoxZone({
         name = fullStationKey,

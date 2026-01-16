@@ -63,17 +63,17 @@ local function getItemPrice(job, itemId)
     local customPrice = MySQL.scalar.await([[
         SELECT price FROM restaurant_pricing WHERE job = ? AND item_id = ?
     ]], { job, itemId })
-    
+
     if customPrice then
         return customPrice
     end
-    
-    -- Fall back to recipe base price
-    local recipe = Config.Recipes[itemId]
+
+    -- Fall back to recipe base price (recipes are in Config.Recipes.Items)
+    local recipe = Config.Recipes and Config.Recipes.Items and Config.Recipes.Items[itemId]
     if recipe then
-        return recipe.price or 0
+        return recipe.basePrice or recipe.price or 0
     end
-    
+
     return 0
 end
 
@@ -333,53 +333,111 @@ local function cancelOrder(orderId, reason, refund)
     return true
 end
 
+--- Get pickup stash ID for a location
+---@param job string
+---@param locationKey string
+---@return string stashId
+local function getPickupStashId(job, locationKey)
+    return ('restaurant_pickup_%s'):format(locationKey or job)
+end
+
 --- Customer picks up order
 ---@param orderId string
 ---@param customerSource number
 ---@return boolean success
+---@return string|nil message
 local function pickupOrder(orderId, customerSource)
     local order = activeOrders[orderId]
-    if not order then return false end
-    
+    if not order then return false, 'Order not found' end
+
     -- Verify customer
     local customer = exports.qbx_core:GetPlayer(customerSource)
     if not customer or customer.PlayerData.citizenid ~= order.customerId then
-        return false
+        return false, 'Not your order'
     end
-    
+
     -- Verify order is ready
     if order.status ~= 'ready' then
-        return false
+        return false, 'Order not ready'
     end
-    
-    -- Give items to customer
-    for _, item in ipairs(order.items) do
-        local itemName = item.resultItem or item.id or item.item
-        local amount = item.amount or item.quantity or 1
-        
-        -- Create metadata for food item
+
+    -- Get pickup stash for this location
+    local stashId = getPickupStashId(order.job, order.locationKey)
+
+    -- Check if items are available in pickup stash
+    local stashItems = exports.ox_inventory:GetInventoryItems(stashId)
+    local missingItems = {}
+
+    for _, orderItem in ipairs(order.items) do
+        local itemName = orderItem.resultItem or orderItem.id or orderItem.item
+        local neededAmount = orderItem.amount or orderItem.quantity or 1
+
+        -- Check if item exists in stash with this order ID
+        local foundAmount = 0
+        if stashItems then
+            for _, stashItem in pairs(stashItems) do
+                if stashItem.name == itemName then
+                    -- Check if metadata matches this order (optional - for strict matching)
+                    if stashItem.metadata and stashItem.metadata.orderId == orderId then
+                        foundAmount = foundAmount + stashItem.count
+                    elseif not stashItem.metadata or not stashItem.metadata.orderId then
+                        -- Allow items without order metadata (simpler workflow)
+                        foundAmount = foundAmount + stashItem.count
+                    end
+                end
+            end
+        end
+
+        if foundAmount < neededAmount then
+            table.insert(missingItems, {
+                name = itemName,
+                label = orderItem.label or itemName,
+                needed = neededAmount,
+                found = foundAmount
+            })
+        end
+    end
+
+    -- If items are missing, notify and fail
+    if #missingItems > 0 then
+        local missingStr = table.concat(
+            lib.table.map(missingItems, function(i) return i.label end),
+            ', '
+        )
+        return false, ('Items not ready: %s'):format(missingStr)
+    end
+
+    -- Transfer items from pickup stash to customer
+    for _, orderItem in ipairs(order.items) do
+        local itemName = orderItem.resultItem or orderItem.id or orderItem.item
+        local amount = orderItem.amount or orderItem.quantity or 1
+
+        -- Remove from stash
+        exports.ox_inventory:RemoveItem(stashId, itemName, amount)
+
+        -- Give to customer with fresh metadata
         local metadata = {
             quality = 100,
             freshness = 100,
-            orderId = orderId,
         }
-        
         exports.ox_inventory:AddItem(customerSource, itemName, amount, metadata)
     end
-    
+
     -- Mark as delivered
     order.status = 'delivered'
     order.deliveredAt = os.time()
-    
+
     -- Update database
     MySQL.update.await([[
         UPDATE restaurant_orders SET status = 'delivered', completed_at = NOW() WHERE id = ?
     ]], { orderId })
-    
+
     -- Remove from active
     activeOrders[orderId] = nil
-    
-    return true
+
+    print(('[free-restaurants] Order #%s picked up by %s'):format(orderId, customer.PlayerData.citizenid))
+
+    return true, nil
 end
 
 -- ============================================================================
@@ -566,6 +624,32 @@ lib.callback.register('free-restaurants:server:addTip', function(source, orderId
     })
     
     return true
+end)
+
+--- Open pickup stash for staff
+RegisterNetEvent('free-restaurants:server:openPickupStash', function(locationKey)
+    local source = source
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return end
+
+    -- Check if on duty
+    if not player.PlayerData.job.onduty then
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Not On Duty',
+            description = 'You must be on duty to access the pickup area.',
+            type = 'error',
+        })
+        return
+    end
+
+    local job = player.PlayerData.job.name
+    local stashId = getPickupStashId(job, locationKey)
+
+    -- Register stash if not already registered
+    exports.ox_inventory:RegisterStash(stashId, 'Order Pickup', 20, 50000, nil, { [job] = 0 })
+
+    -- Open the stash
+    exports.ox_inventory:forceOpenInventory(source, 'stash', stashId)
 end)
 
 -- ============================================================================
