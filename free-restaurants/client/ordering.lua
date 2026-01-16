@@ -367,11 +367,61 @@ showQuickOrderCategory = function(locationKey, locationData, menu, category)
     lib.showContext('quick_order_items')
 end
 
+--- Get nearby players for customer selection
+---@return table players Array of { serverId, name, distance }
+local function getNearbyPlayers()
+    local players = {}
+    local playerPed = PlayerPedId()
+    local playerCoords = GetEntityCoords(playerPed)
+    local myServerId = GetPlayerServerId(PlayerId())
+
+    for _, playerId in ipairs(GetActivePlayers()) do
+        local serverId = GetPlayerServerId(playerId)
+        if serverId ~= myServerId then
+            local targetPed = GetPlayerPed(playerId)
+            local targetCoords = GetEntityCoords(targetPed)
+            local distance = #(playerCoords - targetCoords)
+
+            if distance <= 10.0 then -- Within 10 meters
+                table.insert(players, {
+                    serverId = serverId,
+                    name = GetPlayerName(playerId),
+                    distance = distance,
+                })
+            end
+        end
+    end
+
+    table.sort(players, function(a, b) return a.distance < b.distance end)
+    return players
+end
+
 --- Quick add item (employee enters customer payment)
 ---@param locationKey string
 ---@param item table
 quickAddItem = function(locationKey, item)
+    -- Get nearby customers
+    local nearbyPlayers = getNearbyPlayers()
+    local customerOptions = {}
+
+    for _, player in ipairs(nearbyPlayers) do
+        table.insert(customerOptions, {
+            value = player.serverId,
+            label = ('%s (%.1fm)'):format(player.name, player.distance),
+        })
+    end
+
+    if #customerOptions == 0 then
+        lib.notify({
+            title = 'No Customers',
+            description = 'No customers nearby to bill.',
+            type = 'error',
+        })
+        return
+    end
+
     local input = lib.inputDialog('Quick Order', {
+        { type = 'select', label = 'Customer', options = customerOptions, required = true },
         { type = 'number', label = 'Quantity', default = 1, min = 1, max = 10 },
         { type = 'select', label = 'Payment Method', options = {
             { value = 'cash', label = 'Cash' },
@@ -381,17 +431,18 @@ quickAddItem = function(locationKey, item)
 
     if not input then return end
 
-    local qty = input[1] or 1
-    local paymentMethod = input[2] or 'cash'
+    local customerId = input[1]
+    local qty = input[2] or 1
+    local paymentMethod = input[3] or 'cash'
     local total = item.price * qty * (1 + getTaxRate())
 
-    local success, orderId = lib.callback.await(
-        'free-restaurants:server:placeOrder',
+    local success, orderId, errorMsg = lib.callback.await(
+        'free-restaurants:server:placeRegisterOrder',
         false,
         locationKey,
         {{ id = item.id, label = item.label, amount = qty, price = item.price }},
         paymentMethod,
-        total
+        customerId
     )
 
     if success then
@@ -400,10 +451,11 @@ quickAddItem = function(locationKey, item)
             description = ('Order #%s - %dx %s'):format(orderId, qty, item.label),
             type = 'success',
         })
+        PlaySoundFrontend(-1, 'NAV_UP_DOWN', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
     else
         lib.notify({
             title = 'Order Failed',
-            description = 'Could not create order.',
+            description = errorMsg or 'Could not create order.',
             type = 'error',
         })
     end
@@ -757,7 +809,7 @@ checkOrderPickup = function(locationKey)
         return
     end
 
-    local success = lib.callback.await('free-restaurants:server:pickupOrder', false, myOrder.id)
+    local success, errorMsg = lib.callback.await('free-restaurants:server:pickupOrder', false, myOrder.id)
 
     if success then
         lib.notify({
@@ -769,7 +821,7 @@ checkOrderPickup = function(locationKey)
     else
         lib.notify({
             title = 'Pickup Failed',
-            description = 'Could not pickup your order.',
+            description = errorMsg or 'Could not pickup your order.',
             type = 'error',
         })
     end
