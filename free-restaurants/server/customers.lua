@@ -25,6 +25,9 @@ local activeOrders = {}
 -- Order counter for generating IDs
 local orderCounter = 0
 
+-- Forward declarations for functions used before definition
+local notifyStaff, notifyCustomer
+
 -- ============================================================================
 -- ORDER ID GENERATION
 -- ============================================================================
@@ -387,9 +390,9 @@ end
 ---@param job string
 ---@param eventType string
 ---@param data table
-local function notifyStaff(job, eventType, data)
+notifyStaff = function(job, eventType, data)
     local players = exports.qbx_core:GetQBPlayers()
-    
+
     for _, player in pairs(players) do
         if player.PlayerData.job.name == job and player.PlayerData.job.onduty then
             TriggerClientEvent('free-restaurants:client:orderEvent', player.PlayerData.source, eventType, data)
@@ -401,7 +404,7 @@ end
 ---@param customerSource number
 ---@param eventType string
 ---@param data table
-local function notifyCustomer(customerSource, eventType, data)
+notifyCustomer = function(customerSource, eventType, data)
     if not customerSource then return end
     
     local player = exports.qbx_core:GetPlayer(customerSource)
