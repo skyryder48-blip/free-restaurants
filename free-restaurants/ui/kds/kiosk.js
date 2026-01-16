@@ -148,13 +148,18 @@
 
     // Render menu items
     function renderItems() {
-        if (!elements.items) return;
+        if (!elements.items) {
+            console.log('[Kiosk] renderItems: elements.items is null');
+            return;
+        }
 
         elements.items.innerHTML = '';
 
         const filteredItems = state.selectedCategory
             ? state.menu.filter(item => item.category === state.selectedCategory)
             : state.menu;
+
+        console.log('[Kiosk] renderItems: rendering', filteredItems.length, 'items for category:', state.selectedCategory);
 
         if (filteredItems.length === 0) {
             elements.items.innerHTML = '<div class="no-items">No items in this category</div>';
@@ -174,7 +179,11 @@
                 </div>
             `;
 
-            card.addEventListener('click', () => showItemModal(item));
+            card.addEventListener('click', function(e) {
+                console.log('[Kiosk] Card clicked:', item.label);
+                e.stopPropagation();
+                showItemModal(item);
+            });
 
             elements.items.appendChild(card);
         });
@@ -182,6 +191,7 @@
 
     // Show item detail modal
     function showItemModal(item) {
+        console.log('[Kiosk] showItemModal called for:', item.label);
         state.selectedItem = item;
         state.selectedQty = 1;
         state.selectedMods = [];
@@ -229,7 +239,8 @@
             </div>
         `;
 
-        document.body.appendChild(modal);
+        // Append to kiosk-container (not body) because body has pointer-events: none
+        elements.container.appendChild(modal);
 
         // Event listeners
         document.getElementById('qty-minus').addEventListener('click', () => {
@@ -433,7 +444,8 @@
             </div>
         `;
 
-        document.body.appendChild(modal);
+        // Append to kiosk-container (not body) because body has pointer-events: none
+        elements.container.appendChild(modal);
 
         // Event listeners
         modal.querySelectorAll('.payment-btn').forEach(btn => {
@@ -606,6 +618,9 @@
     // Keyboard handler
     document.addEventListener('keydown', function(e) {
         if (state.visible && e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+
             // Close modals first
             const itemModal = document.getElementById('item-detail-modal');
             const paymentModal = document.getElementById('payment-modal');
@@ -614,7 +629,7 @@
                 closeItemModal();
             } else if (paymentModal) {
                 closePaymentModal();
-            } else if (!elements.cartSidebar.classList.contains('hidden')) {
+            } else if (elements.cartSidebar && !elements.cartSidebar.classList.contains('hidden')) {
                 closeCart();
             } else {
                 window.Kiosk.hide();
