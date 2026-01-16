@@ -520,6 +520,59 @@ lib.callback.register('free-restaurants:server:placeOrder', function(source, loc
     end
 end)
 
+--- Place register order (staff places order, bills specific customer)
+lib.callback.register('free-restaurants:server:placeRegisterOrder', function(source, locationKey, items, paymentMethod, customerServerId)
+    -- Verify staff is on duty
+    local staff = exports.qbx_core:GetPlayer(source)
+    if not staff or not staff.PlayerData.job.onduty then
+        return false, nil, 'Must be on duty'
+    end
+
+    -- Verify customer exists
+    local customer = exports.qbx_core:GetPlayer(customerServerId)
+    if not customer then
+        return false, nil, 'Customer not found'
+    end
+
+    -- Get job from location
+    local job = nil
+    for restaurantType, locations in pairs(Config.Locations) do
+        if type(locations) == 'table' then
+            for locId, locData in pairs(locations) do
+                local key = ('%s_%s'):format(restaurantType, locId)
+                if key == locationKey and locData.job then
+                    job = locData.job
+                    break
+                end
+            end
+        end
+        if job then break end
+    end
+
+    if not job then
+        job = locationKey:match('^([^_]+)')
+    end
+
+    if not job then
+        return false, nil, 'Invalid location'
+    end
+
+    -- Create order (bills the customer)
+    local orderId, error = createOrder(customerServerId, job, locationKey, items, paymentMethod)
+
+    if orderId then
+        -- Notify customer
+        TriggerClientEvent('ox_lib:notify', customerServerId, {
+            title = 'Order Placed',
+            description = ('Order #%s has been placed for you'):format(orderId),
+            type = 'success',
+        })
+        return true, orderId, nil
+    else
+        return false, nil, error
+    end
+end)
+
 --- Start working on order
 lib.callback.register('free-restaurants:server:startOrder', function(source, orderId)
     return updateOrderStatus(orderId, 'in_progress', source)
