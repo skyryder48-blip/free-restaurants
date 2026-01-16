@@ -529,6 +529,10 @@ setupOrderingTargets = function()
                                     local targetName = ('%s_kiosk_%s'):format(key, kioskId)
                                     totalKiosks = totalKiosks + 1
 
+                                    -- Store data for callback
+                                    local kioskKey = capturedKey
+                                    local kioskLocData = capturedLocationData
+
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = kioskData.coords,
@@ -537,11 +541,12 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = targetName .. '_option',
+                                                name = 'use_kiosk',
                                                 label = kioskData.label or 'Self-Order Kiosk',
-                                                icon = 'fas fa-tablet-alt',
+                                                icon = 'fa-solid fa-tablet',
                                                 onSelect = function()
-                                                    openKiosk(capturedKey, capturedLocationData)
+                                                    print('[free-restaurants] Kiosk selected: ' .. kioskKey)
+                                                    openKiosk(kioskKey, kioskLocData)
                                                 end,
                                             },
                                         },
@@ -560,6 +565,10 @@ setupOrderingTargets = function()
                                     local job = locationData.job
                                     totalRegisters = totalRegisters + 1
 
+                                    -- Store data for callback
+                                    local regKey = capturedKey
+                                    local regLocData = capturedLocationData
+
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = registerData.coords,
@@ -568,12 +577,13 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = targetName .. '_option',
+                                                name = 'use_register',
                                                 label = registerData.label or 'Register',
-                                                icon = 'fas fa-cash-register',
+                                                icon = 'fa-solid fa-cash-register',
                                                 groups = job and { [job] = registerData.minGrade or 0 } or nil,
                                                 onSelect = function()
-                                                    openRegister(capturedKey, capturedLocationData)
+                                                    print('[free-restaurants] Register selected: ' .. regKey)
+                                                    openRegister(regKey, regLocData)
                                                 end,
                                             },
                                         },
@@ -592,6 +602,10 @@ setupOrderingTargets = function()
                                     local job = locationData.job
                                     totalKDS = totalKDS + 1
 
+                                    -- Store data for callback
+                                    local kdsKey = capturedKey
+                                    local kdsLocData = capturedLocationData
+
                                     exports.ox_target:addBoxZone({
                                         name = targetName,
                                         coords = kdsData.coords,
@@ -600,12 +614,13 @@ setupOrderingTargets = function()
                                         debug = Config.Debug,
                                         options = {
                                             {
-                                                name = targetName .. '_option',
+                                                name = 'view_kds',
                                                 label = kdsData.label or 'Kitchen Display',
-                                                icon = 'fas fa-tv',
+                                                icon = 'fa-solid fa-tv',
                                                 groups = job and { [job] = kdsData.minGrade or 0 } or nil,
                                                 onSelect = function()
-                                                    openKDS(capturedKey, capturedLocationData)
+                                                    print('[free-restaurants] KDS selected: ' .. kdsKey)
+                                                    openKDS(kdsKey, kdsLocData)
                                                 end,
                                             },
                                         },
