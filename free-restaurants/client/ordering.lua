@@ -51,6 +51,8 @@ local showQuickOrderMenu, showQuickOrderCategory, quickAddItem
 local openKDS, closeKDS
 local setupOrderingTargets, initializeTargets, removeOrderingTargets
 local checkOrderPickup
+local getNearbyPlayers
+local showRegisterFullOrderMenu, showRegisterCategoryItems
 
 --- Remove all ordering targets
 removeOrderingTargets = function()
@@ -253,6 +255,160 @@ end)
 -- REGISTER SYSTEM (Employee)
 -- ============================================================================
 
+--- Selected customer for register orders (persists during order taking)
+local selectedCustomer = nil
+
+--- Open register customer selection then full order menu
+---@param locationKey string
+---@param locationData table
+local function openRegisterOrderMenu(locationKey, locationData)
+    -- Get nearby customers
+    local nearbyPlayers = getNearbyPlayers()
+
+    if #nearbyPlayers == 0 then
+        lib.notify({
+            title = 'No Customers',
+            description = 'No customers nearby to take an order from.',
+            type = 'error',
+        })
+        return
+    end
+
+    local customerOptions = {}
+    for _, player in ipairs(nearbyPlayers) do
+        table.insert(customerOptions, {
+            value = player.serverId,
+            label = ('%s (%.1fm)'):format(player.name, player.distance),
+        })
+    end
+
+    local input = lib.inputDialog('Select Customer', {
+        { type = 'select', label = 'Customer to Bill', options = customerOptions, required = true },
+        { type = 'select', label = 'Payment Method', options = {
+            { value = 'cash', label = 'Cash' },
+            { value = 'card', label = 'Card' },
+        }, required = true },
+    })
+
+    if not input then return end
+
+    selectedCustomer = {
+        serverId = input[1],
+        paymentMethod = input[2],
+        name = nil,
+    }
+
+    -- Find customer name
+    for _, p in ipairs(nearbyPlayers) do
+        if p.serverId == input[1] then
+            selectedCustomer.name = p.name
+            break
+        end
+    end
+
+    -- Now show the full order menu for building the order
+    showRegisterFullOrderMenu(locationKey, locationData)
+end
+
+--- Show full order menu for register (multi-item order builder)
+---@param locationKey string
+---@param locationData table
+showRegisterFullOrderMenu = function(locationKey, locationData)
+    local menu, categories = getLocationMenu(locationData)
+
+    -- Build category options
+    local options = {
+        {
+            title = ('Customer: %s'):format(selectedCustomer.name or 'Unknown'),
+            description = ('Payment: %s'):format(selectedCustomer.paymentMethod == 'cash' and 'Cash' or 'Card'),
+            icon = 'fa-solid fa-user',
+            disabled = true,
+        },
+    }
+
+    for _, category in ipairs(categories) do
+        table.insert(options, {
+            title = category,
+            icon = 'fa-solid fa-utensils',
+            arrow = true,
+            onSelect = function()
+                showRegisterCategoryItems(locationKey, locationData, menu, category)
+            end,
+        })
+    end
+
+    lib.registerContext({
+        id = 'register_full_order',
+        title = 'Take Order',
+        menu = 'register_menu',
+        options = options,
+    })
+
+    lib.showContext('register_full_order')
+end
+
+--- Show items in a category for register ordering
+---@param locationKey string
+---@param locationData table
+---@param menu table
+---@param category string
+showRegisterCategoryItems = function(locationKey, locationData, menu, category)
+    local options = {}
+
+    for _, item in ipairs(menu) do
+        if item.category == category then
+            table.insert(options, {
+                title = item.label,
+                description = FreeRestaurants.Utils.FormatMoney(item.price),
+                icon = 'fa-solid fa-plus',
+                onSelect = function()
+                    -- Add item for the selected customer
+                    local input = lib.inputDialog(item.label, {
+                        { type = 'number', label = 'Quantity', default = 1, min = 1, max = 10 },
+                    })
+
+                    if not input then return end
+
+                    local qty = input[1] or 1
+
+                    local success, orderId, errorMsg = lib.callback.await(
+                        'free-restaurants:server:placeRegisterOrder',
+                        false,
+                        locationKey,
+                        {{ id = item.id, label = item.label, amount = qty, price = item.price }},
+                        selectedCustomer.paymentMethod,
+                        selectedCustomer.serverId
+                    )
+
+                    if success then
+                        lib.notify({
+                            title = 'Order Created',
+                            description = ('Order #%s for %s'):format(orderId, selectedCustomer.name),
+                            type = 'success',
+                        })
+                        PlaySoundFrontend(-1, 'NAV_UP_DOWN', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
+                    else
+                        lib.notify({
+                            title = 'Order Failed',
+                            description = errorMsg or 'Could not create order.',
+                            type = 'error',
+                        })
+                    end
+                end,
+            })
+        end
+    end
+
+    lib.registerContext({
+        id = 'register_category_items',
+        title = category,
+        menu = 'register_full_order',
+        options = options,
+    })
+
+    lib.showContext('register_category_items')
+end
+
 --- Open register ordering interface for employee
 ---@param locationKey string
 ---@param locationData table
@@ -274,10 +430,10 @@ openRegister = function(locationKey, locationData)
     local options = {
         {
             title = 'Take New Order',
-            description = 'Enter a customer order',
+            description = 'Select customer and enter their order',
             icon = 'fa-solid fa-receipt',
             onSelect = function()
-                openKiosk(locationKey, locationData)
+                openRegisterOrderMenu(locationKey, locationData)
             end,
         },
         {
@@ -290,7 +446,7 @@ openRegister = function(locationKey, locationData)
         },
         {
             title = 'Quick Order',
-            description = 'Add items directly',
+            description = 'Add single item quickly',
             icon = 'fa-solid fa-bolt',
             arrow = true,
             onSelect = function()
@@ -369,7 +525,7 @@ end
 
 --- Get nearby players for customer selection
 ---@return table players Array of { serverId, name, distance }
-local function getNearbyPlayers()
+getNearbyPlayers = function()
     local players = {}
     local playerPed = PlayerPedId()
     local playerCoords = GetEntityCoords(playerPed)
@@ -759,12 +915,13 @@ setupOrderingTargets = function()
                                     {
                                         name = 'pickup_order_' .. targetName,
                                         label = pickupData.label or 'Pickup Order',
-                                        icon = 'fa-solid fa-hand-holding',
+                                        icon = 'fa-solid fa-box-open',
                                         canInteract = function()
                                             return true
                                         end,
                                         onSelect = function()
-                                            checkOrderPickup(capturedKey)
+                                            -- Open pickup stash directly for customers
+                                            TriggerServerEvent('free-restaurants:server:openCustomerPickupStash', capturedKey)
                                         end,
                                     },
                                 },
@@ -940,6 +1097,54 @@ AddEventHandler('onResourceStop', function(resourceName)
 
     -- Remove all ordering targets
     removeOrderingTargets()
+end)
+
+-- ============================================================================
+-- RECEIPT ITEM HANDLER
+-- ============================================================================
+
+--- Display receipt details when item is used
+exports.ox_inventory:AddItemHook('restaurant_receipt', function(data)
+    local metadata = data.metadata
+    if not metadata or not metadata.orderId then
+        lib.notify({
+            title = 'Invalid Receipt',
+            description = 'This receipt is damaged or invalid.',
+            type = 'error',
+        })
+        return false
+    end
+
+    -- Build receipt display
+    local itemsList = ''
+    if metadata.items then
+        for _, item in ipairs(metadata.items) do
+            local qty = item.amount or item.quantity or 1
+            local label = item.label or item.id or 'Item'
+            itemsList = itemsList .. ('\n  %dx %s'):format(qty, label)
+        end
+    end
+
+    local timestamp = metadata.timestamp and os.date('%Y-%m-%d %H:%M', metadata.timestamp) or 'Unknown'
+    local paymentText = metadata.paymentMethod == 'cash' and 'Cash' or 'Card'
+
+    lib.alertDialog({
+        header = ('Receipt #%s'):format(metadata.orderId),
+        content = ('**Restaurant:** %s\n**Customer:** %s\n**Date:** %s\n**Payment:** %s\n\n**Items:**%s\n\n**Subtotal:** $%d\n**Tax:** $%d\n**Total:** $%d'):format(
+            metadata.restaurant or 'Unknown',
+            metadata.customerName or 'Unknown',
+            timestamp,
+            paymentText,
+            itemsList,
+            metadata.subtotal or 0,
+            metadata.tax or 0,
+            metadata.total or 0
+        ),
+        centered = true,
+        cancel = false,
+    })
+
+    return false -- Don't consume the item
 end)
 
 -- ============================================================================
