@@ -42,14 +42,24 @@ local kdsVisible = false                -- KDS overlay visibility
 local kioskVisible = false              -- Kiosk overlay visibility
 local currentLocation = nil             -- Current location key
 local currentJob = nil                  -- Current job name
+local orderingTargets = {}              -- Track created ox_target zones for cleanup
 
 -- Forward declarations for functions that reference each other
 local openKiosk, closeKiosk
 local openRegister
 local showQuickOrderMenu, showQuickOrderCategory, quickAddItem
 local openKDS, closeKDS
-local setupOrderingTargets, initializeTargets
+local setupOrderingTargets, initializeTargets, removeOrderingTargets
 local checkOrderPickup
+
+--- Remove all ordering targets
+removeOrderingTargets = function()
+    for targetId in pairs(orderingTargets) do
+        exports.ox_target:removeZone(targetId)
+    end
+    orderingTargets = {}
+    print('[free-restaurants] Removed all ordering targets')
+end
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -567,6 +577,7 @@ setupOrderingTargets = function()
                                         },
                                     })
 
+                                    orderingTargets[targetName] = true
                                     print(('[free-restaurants]   + Kiosk: %s at %s'):format(kioskId, kioskData.coords))
                                 end
                             end
@@ -604,6 +615,7 @@ setupOrderingTargets = function()
                                         },
                                     })
 
+                                    orderingTargets[targetName] = true
                                     print(('[free-restaurants]   + Register: %s (job: %s) at %s'):format(registerId, job or 'any', registerData.coords))
                                 end
                             end
@@ -640,6 +652,8 @@ setupOrderingTargets = function()
                                             },
                                         },
                                     })
+
+                                    orderingTargets[targetName] = true
                                 end
                             end
                         end
@@ -667,6 +681,7 @@ setupOrderingTargets = function()
                                 },
                             })
 
+                            orderingTargets[targetName] = true
                             print(('[free-restaurants]   + Pickup counter at %s'):format(pickupData.coords))
                         end
                     else
@@ -793,17 +808,18 @@ lib.addKeybind({
 
 local targetsInitialized = false
 
---- Initialize targets (called once)
+--- Initialize targets (removes old targets and creates new ones)
 initializeTargets = function()
-    if targetsInitialized then return end
-    targetsInitialized = true
+    -- Always clean up existing targets first (like duty.lua does)
+    removeOrderingTargets()
 
     print('[free-restaurants] Initializing ordering targets...')
     setupOrderingTargets()
+    targetsInitialized = true
     print('[free-restaurants] Ordering targets initialized')
 end
 
---- Initialize on resource start
+--- Initialize on resource start (main initialization point)
 RegisterNetEvent('free-restaurants:client:ready', function()
     initializeTargets()
 end)
@@ -818,22 +834,10 @@ CreateThread(function()
     -- Give a moment for other systems to initialize
     Wait(2000)
 
-    -- Initialize targets if not already done
+    -- Initialize targets if not already done by the ready event
     if not targetsInitialized then
         print('[free-restaurants] Fallback initialization of ordering targets')
         initializeTargets()
-    end
-end)
-
---- Also initialize on resource start for the current resource
-AddEventHandler('onClientResourceStart', function(resourceName)
-    if resourceName == GetCurrentResourceName() then
-        CreateThread(function()
-            Wait(1000)
-            if not targetsInitialized then
-                initializeTargets()
-            end
-        end)
     end
 end)
 
@@ -844,6 +848,9 @@ AddEventHandler('onResourceStop', function(resourceName)
     -- Close any open UIs
     if kdsVisible then closeKDS() end
     if kioskVisible then closeKiosk() end
+
+    -- Remove all ordering targets
+    removeOrderingTargets()
 end)
 
 -- ============================================================================
