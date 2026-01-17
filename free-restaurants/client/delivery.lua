@@ -917,11 +917,7 @@ attemptPickup = function()
         local timeLimit = activeDelivery.timeLimit or 1200 -- Default 20 minutes
         startCountdownNotifications(timeLimit)
 
-        -- Spawn customer NPC at destination
-        local dest = activeDelivery.destination
-        CreateThread(function()
-            spawnCustomerNpc(dest.coords, dest.heading or 0.0)
-        end)
+        -- NPC will be spawned when player arrives at destination (can't spawn at distance)
 
         -- Start delivery tracking
         CreateThread(function()
@@ -965,6 +961,10 @@ arriveAtDestination = function()
 
     -- Stop countdown
     stopCountdownNotifications()
+
+    -- Spawn customer NPC now that we're close enough
+    local dest = activeDelivery.destination
+    spawnCustomerNpc(dest.coords, dest.heading or 0.0)
 
     lib.notify({
         title = 'Arrived',
