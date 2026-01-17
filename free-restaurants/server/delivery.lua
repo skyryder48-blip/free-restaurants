@@ -462,12 +462,12 @@ local function isDeliveryReady(deliveryId)
     end
 end
 
---- Mark items as picked up from pickup stash
+--- Mark delivery as ready for transport (called when KDS order is ready)
 ---@param deliveryId string
 ---@param employeeSource number
 ---@return boolean success
 ---@return string|nil error
-local function pickupDeliveryItems(deliveryId, employeeSource)
+local function markDeliveryReady(deliveryId, employeeSource)
     local delivery = activeDeliveries[deliveryId]
     if not delivery then return false, 'Delivery not found' end
 
@@ -482,41 +482,11 @@ local function pickupDeliveryItems(deliveryId, employeeSource)
         elseif status == 'cooking' then
             return false, 'Order is being prepared'
         else
-            return false, 'Order not ready for pickup'
+            return false, 'Order not ready'
         end
     end
 
-    -- Get stash ID for this location
-    local stashId = ('restaurant_pickup_%s'):format(delivery.sourceLocation)
-
-    -- Check stash has all items
-    for _, item in ipairs(delivery.items) do
-        local itemName = item.resultItem or item.id
-        local stashItems = exports.ox_inventory:GetInventoryItems(stashId)
-        local found = 0
-
-        if stashItems then
-            for _, stashItem in pairs(stashItems) do
-                if stashItem.name == itemName then
-                    found = found + stashItem.count
-                end
-            end
-        end
-
-        if found < item.amount then
-            return false, ('Missing items in pickup area: %s'):format(item.label)
-        end
-    end
-
-    -- Move items from stash to delivery driver
-    for _, item in ipairs(delivery.items) do
-        local itemName = item.resultItem or item.id
-        -- Remove from stash
-        exports.ox_inventory:RemoveItem(stashId, itemName, item.amount)
-        -- Add to driver
-        exports.ox_inventory:AddItem(employeeSource, itemName, item.amount)
-    end
-
+    -- Mark as picked up (player can deliver with items from any source)
     delivery.status = 'picked_up'
     delivery.pickedUpAt = os.time()
 
@@ -535,14 +505,51 @@ end
 ---@param customerSatisfaction? number 0-100 satisfaction rating
 ---@return boolean success
 ---@return number earnings
+---@return number|nil missingItemsCost
 local function completeDelivery(deliveryId, employeeSource, customerSatisfaction)
     local delivery = activeDeliveries[deliveryId]
-    if not delivery then return false, 0 end
+    if not delivery then return false, 0, nil end
 
-    if delivery.status ~= 'picked_up' then return false, 0 end
-    if delivery.employeeSource ~= employeeSource then return false, 0 end
+    if delivery.status ~= 'picked_up' then return false, 0, nil end
+    if delivery.employeeSource ~= employeeSource then return false, 0, nil end
 
-    customerSatisfaction = customerSatisfaction or math.random(70, 100)
+    local employee = exports.qbx_core:GetPlayer(employeeSource)
+    if not employee then return false, 0, nil end
+
+    -- Check player inventory for delivery items and calculate missing costs
+    local missingItemsCost = 0
+    local hasAllItems = true
+
+    for _, item in ipairs(delivery.items) do
+        local itemName = item.resultItem or item.id
+        local playerCount = exports.ox_inventory:GetItemCount(employeeSource, itemName)
+        local needed = item.amount
+
+        if playerCount < needed then
+            hasAllItems = false
+            local missing = needed - playerCount
+            missingItemsCost = missingItemsCost + (missing * (item.price or 10))
+        end
+
+        -- Remove delivered items from player inventory
+        if playerCount > 0 then
+            local toRemove = math.min(playerCount, needed)
+            exports.ox_inventory:RemoveItem(employeeSource, itemName, toRemove)
+        end
+    end
+
+    -- Deduct missing items cost from player's bank
+    if missingItemsCost > 0 then
+        employee.Functions.RemoveMoney('bank', missingItemsCost, 'delivery-missing-items')
+        print(('[free-restaurants] Delivery %s: $%d deducted for missing items'):format(deliveryId, missingItemsCost))
+    end
+
+    -- Reduce satisfaction if items were missing
+    if not hasAllItems then
+        customerSatisfaction = math.random(30, 60) -- Lower satisfaction for incomplete order
+    else
+        customerSatisfaction = customerSatisfaction or math.random(70, 100)
+    end
 
     -- Calculate final tip based on satisfaction and time
     local timeElapsed = os.time() - delivery.acceptedAt
@@ -556,26 +563,27 @@ local function completeDelivery(deliveryId, employeeSource, customerSatisfaction
     local totalEarnings = delivery.deliveryFee + actualTip + (delivery.distanceBonus or 0)
 
     -- Pay employee
-    local employee = exports.qbx_core:GetPlayer(employeeSource)
-    if employee then
-        employee.Functions.AddMoney('cash', totalEarnings, 'restaurant-delivery')
+    employee.Functions.AddMoney('cash', totalEarnings, 'restaurant-delivery')
 
-        -- Track earnings
-        exports['free-restaurants']:AddSessionEarnings(employeeSource, totalEarnings, 'delivery')
-        exports['free-restaurants']:IncrementTasks(employeeSource)
+    -- Track earnings
+    exports['free-restaurants']:AddSessionEarnings(employeeSource, totalEarnings, 'delivery')
+    exports['free-restaurants']:IncrementTasks(employeeSource)
 
-        -- Award XP
-        exports['free-restaurants']:AwardXP(employeeSource, 25, 'Delivery completed', 'delivery')
+    -- Award XP (less XP if incomplete)
+    local xpAmount = hasAllItems and 25 or 10
+    exports['free-restaurants']:AwardXP(employeeSource, xpAmount, 'Delivery completed', 'delivery')
+
+    -- Add revenue to business (minus missing items that weren't delivered)
+    local businessRevenue = delivery.itemsTotal - missingItemsCost
+    if businessRevenue > 0 then
+        exports['free-restaurants']:UpdateBusinessBalance(
+            delivery.job,
+            businessRevenue,
+            'delivery_sale',
+            ('Delivery #%s'):format(deliveryId),
+            delivery.employeeCitizenid
+        )
     end
-
-    -- Add revenue to business
-    exports['free-restaurants']:UpdateBusinessBalance(
-        delivery.job,
-        delivery.itemsTotal,
-        'delivery_sale',
-        ('Delivery #%s'):format(deliveryId),
-        delivery.employeeCitizenid
-    )
 
     delivery.status = 'delivered'
     delivery.deliveredAt = os.time()
@@ -754,7 +762,7 @@ end)
 
 --- Pickup delivery items
 lib.callback.register('free-restaurants:server:pickupDelivery', function(source, deliveryId)
-    local success, error = pickupDeliveryItems(deliveryId, source)
+    local success, error = markDeliveryReady(deliveryId, source)
     return success, error
 end)
 
@@ -903,17 +911,51 @@ end)
 
 CreateThread(function()
     while true do
-        Wait(300000) -- 5 minutes
+        Wait(60000) -- Check every 1 minute for expiry
 
         local currentTime = os.time()
 
         for id, delivery in pairs(activeDeliveries) do
-            -- Clean up expired pending deliveries
+            -- Clean up expired pending deliveries (not yet accepted)
             if delivery.status == 'pending' and currentTime > delivery.expiresAt then
                 activeDeliveries[id] = nil
             end
 
-            -- Clean up very old deliveries
+            -- Check for accepted/picked_up deliveries that have timed out
+            if (delivery.status == 'accepted' or delivery.status == 'picked_up') and delivery.acceptedAt then
+                local timeLimit = delivery.timeLimit or 1200 -- Default 20 minutes
+                local timeElapsed = currentTime - delivery.acceptedAt
+
+                if timeElapsed > timeLimit then
+                    -- Delivery expired - deduct order cost from player's bank
+                    if delivery.employeeSource then
+                        local player = exports.qbx_core:GetPlayer(delivery.employeeSource)
+                        if player then
+                            local deductAmount = delivery.itemsTotal or 0
+                            if deductAmount > 0 then
+                                player.Functions.RemoveMoney('bank', deductAmount, 'delivery-expired')
+                                TriggerClientEvent('ox_lib:notify', delivery.employeeSource, {
+                                    title = 'Delivery Expired',
+                                    description = ('$%d deducted for undelivered order'):format(deductAmount),
+                                    type = 'error',
+                                    duration = 10000,
+                                })
+                                print(('[free-restaurants] Delivery %s expired - $%d deducted from player'):format(id, deductAmount))
+                            end
+                        end
+                    end
+
+                    -- Cancel the KDS order if it exists
+                    if delivery.kdsOrderId then
+                        exports['free-restaurants']:CancelOrder(delivery.kdsOrderId)
+                    end
+
+                    -- Clean up the delivery
+                    activeDeliveries[id] = nil
+                end
+            end
+
+            -- Clean up very old deliveries (failsafe)
             if currentTime - delivery.createdAt > 7200 then -- 2 hours
                 activeDeliveries[id] = nil
             end
