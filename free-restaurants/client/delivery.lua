@@ -646,6 +646,10 @@ waitForOrderReady = function(locationKey, locationData)
                 })
                 PlaySoundFrontend(-1, 'PICK_UP', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
 
+                -- Set GPS waypoint to delivery destination now
+                local dest = activeDelivery.destination
+                setDeliveryWaypoint(dest.coords, dest.label)
+
                 -- Now wait for pickup
                 waitForPickup(locationKey, locationData)
                 return
@@ -688,19 +692,16 @@ attemptPickup = function()
 
         lib.notify({
             title = 'Items Collected',
-            description = 'Head to the delivery location',
+            description = 'Head to the delivery location - follow your GPS',
             type = 'success',
         })
-
-        -- Set waypoint to destination
-        local dest = activeDelivery.destination
-        setDeliveryWaypoint(dest.coords, dest.label)
 
         -- Start countdown notifications
         local timeLimit = activeDelivery.timeLimit or 1200 -- Default 20 minutes
         startCountdownNotifications(timeLimit)
 
         -- Spawn customer NPC at destination
+        local dest = activeDelivery.destination
         CreateThread(function()
             spawnCustomerNpc(dest.coords, dest.heading or 0.0)
         end)
