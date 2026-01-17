@@ -25,8 +25,14 @@ local deliveryCheckpoint = nil
 local isOnDelivery = false
 local deliveryVehicle = nil
 local deliveryVehicleDeposit = 0
+local deliveryVehicleLocationKey = nil
+local deliveryVehicleLocationData = nil
 local customerNpc = nil
 local countdownThread = nil
+local vehicleTimeoutThread = nil
+local returnZoneMarker = nil
+local RETURN_ZONE_RADIUS = 10.0 -- Must be within 10m to return
+local RETURN_ZONE_MARKER_DISTANCE = 100.0 -- Show marker when within 100m
 
 -- Customer NPC models for delivery destinations
 local customerModels = {
@@ -188,10 +194,168 @@ local function showVehicleChoiceDialog(locationData)
     return nil
 end
 
+--- Check if vehicle is damaged (health below threshold)
+---@param vehicle number Vehicle entity
+---@return boolean isDamaged
+local function isVehicleDamaged(vehicle)
+    if not vehicle or not DoesEntityExist(vehicle) then return true end
+
+    local bodyHealth = GetVehicleBodyHealth(vehicle)
+    local engineHealth = GetVehicleEngineHealth(vehicle)
+
+    -- Consider damaged if either health is below 900 (out of 1000)
+    return bodyHealth < 900 or engineHealth < 900
+end
+
+--- Check if vehicle is in return zone
+---@param vehicle number Vehicle entity
+---@param returnCoords vector3 Return zone coordinates
+---@return boolean inZone
+local function isVehicleInReturnZone(vehicle, returnCoords)
+    if not vehicle or not DoesEntityExist(vehicle) then return false end
+    if not returnCoords then return false end
+
+    local vehicleCoords = GetEntityCoords(vehicle)
+    local distance = #(vehicleCoords - returnCoords)
+
+    return distance <= RETURN_ZONE_RADIUS
+end
+
+--- Start vehicle timeout monitoring thread
+local function startVehicleTimeoutMonitor()
+    -- Stop existing thread if any
+    vehicleTimeoutThread = nil
+
+    vehicleTimeoutThread = CreateThread(function()
+        while deliveryVehicle and DoesEntityExist(deliveryVehicle) do
+            Wait(30000) -- Check every 30 seconds
+
+            -- Get deposit info from server
+            local info = lib.callback.await('free-restaurants:server:getVehicleDepositInfo', false)
+
+            if info then
+                -- Warn when 5 minutes remaining
+                if info.timeRemaining <= 300 and info.timeRemaining > 270 then
+                    lib.notify({
+                        title = 'Vehicle Return Warning',
+                        description = '5 minutes to return vehicle or lose deposit!',
+                        type = 'warning',
+                        duration = 7000,
+                    })
+                    PlaySoundFrontend(-1, 'Beep_Red', 'DLC_HEIST_HACKING_SNAKE_SOUNDS', true)
+                -- Warn when 1 minute remaining
+                elseif info.timeRemaining <= 60 and info.timeRemaining > 30 then
+                    lib.notify({
+                        title = 'Vehicle Return URGENT',
+                        description = '1 minute remaining! Return now!',
+                        type = 'error',
+                        duration = 7000,
+                    })
+                    PlaySoundFrontend(-1, 'Beep_Red', 'DLC_HEIST_HACKING_SNAKE_SOUNDS', true)
+                -- Timeout expired
+                elseif info.isExpired then
+                    lib.notify({
+                        title = 'Deposit Forfeited',
+                        description = ('$%d lost - vehicle not returned in time'):format(deliveryVehicleDeposit),
+                        type = 'error',
+                        duration = 10000,
+                    })
+                    PlaySoundFrontend(-1, 'CHECKPOINT_MISSED', 'HUD_MINI_GAME_SOUNDSET', true)
+
+                    -- Forfeit deposit and clean up vehicle
+                    lib.callback.await('free-restaurants:server:forfeitVehicleDeposit', false)
+                    if deliveryVehicle and DoesEntityExist(deliveryVehicle) then
+                        DeleteEntity(deliveryVehicle)
+                    end
+                    deliveryVehicle = nil
+                    deliveryVehicleDeposit = 0
+                    deliveryVehicleLocationKey = nil
+                    deliveryVehicleLocationData = nil
+                    break
+                end
+            end
+        end
+    end)
+end
+
+--- Start return zone marker display thread
+local function startReturnZoneMarkerThread()
+    CreateThread(function()
+        local showingUI = false
+        local lastShowingMarker = false
+
+        while deliveryVehicle and DoesEntityExist(deliveryVehicle) do
+            Wait(0) -- Need Wait(0) for DrawMarker to render each frame
+
+            -- Only show marker when not on active delivery
+            if not isOnDelivery and deliveryVehicleLocationData then
+                local returnPoint = deliveryVehicleLocationData.delivery and deliveryVehicleLocationData.delivery.returnPoint
+                if returnPoint and returnPoint.coords then
+                    local playerCoords = GetEntityCoords(cache.ped)
+                    local distance = #(playerCoords - returnPoint.coords)
+
+                    -- Show marker when within display distance
+                    if distance <= RETURN_ZONE_MARKER_DISTANCE then
+                        lastShowingMarker = true
+
+                        -- Draw cylinder marker at return zone
+                        DrawMarker(
+                            1, -- Cylinder
+                            returnPoint.coords.x, returnPoint.coords.y, returnPoint.coords.z - 1.0,
+                            0, 0, 0,
+                            0, 0, 0,
+                            RETURN_ZONE_RADIUS * 2, RETURN_ZONE_RADIUS * 2, 2.0,
+                            0, 255, 0, 100, -- Green, semi-transparent
+                            false, false, 2, false, nil, nil, false
+                        )
+
+                        -- Show text UI when very close
+                        if distance <= RETURN_ZONE_RADIUS + 5 then
+                            local inZone = distance <= RETURN_ZONE_RADIUS
+                            if inZone then
+                                lib.showTextUI('[E] Return Vehicle', { icon = 'car' })
+                            else
+                                lib.showTextUI('Drive into zone to return vehicle', { icon = 'car' })
+                            end
+                            showingUI = true
+                        elseif showingUI then
+                            lib.hideTextUI()
+                            showingUI = false
+                        end
+                    else
+                        -- Player left the marker area
+                        if showingUI then
+                            lib.hideTextUI()
+                            showingUI = false
+                        end
+                        lastShowingMarker = false
+                        Wait(500) -- Sleep longer when far away
+                    end
+                else
+                    Wait(500)
+                end
+            else
+                -- On delivery or no location data
+                if showingUI then
+                    lib.hideTextUI()
+                    showingUI = false
+                end
+                Wait(500)
+            end
+        end
+
+        -- Cleanup when loop exits
+        if showingUI then
+            lib.hideTextUI()
+        end
+    end)
+end
+
 --- Spawn delivery vehicle
+---@param locationKey string
 ---@param locationData table
 ---@return boolean success
-local function spawnDeliveryVehicle(locationData)
+local function spawnDeliveryVehicle(locationKey, locationData)
     if not locationData.delivery or not locationData.delivery.vehicleSpawn then
         lib.notify({
             title = 'Error',
@@ -232,7 +396,7 @@ local function spawnDeliveryVehicle(locationData)
             type = 'error',
         })
         -- Refund deposit since we couldn't spawn
-        lib.callback.await('free-restaurants:server:returnDeliveryVehicle', false)
+        lib.callback.await('free-restaurants:server:returnDeliveryVehicle', false, false, true)
         return false
     end
 
@@ -247,18 +411,26 @@ local function spawnDeliveryVehicle(locationData)
         -- Set as mission entity so it doesn't despawn
         SetEntityAsMissionEntity(deliveryVehicle, true, true)
 
-        -- Store deposit amount
+        -- Store deposit amount and location info for return zone checks
         deliveryVehicleDeposit = result.deposit
+        deliveryVehicleLocationKey = locationKey
+        deliveryVehicleLocationData = locationData
 
-        -- Register with server
+        -- Register with server (include location key)
         local netId = NetworkGetNetworkIdFromEntity(deliveryVehicle)
-        lib.callback.await('free-restaurants:server:registerDeliveryVehicle', false, netId, result.deposit)
+        lib.callback.await('free-restaurants:server:registerDeliveryVehicle', false, netId, result.deposit, locationKey)
 
         lib.notify({
             title = 'Vehicle Ready',
-            description = ('$%d deposit taken - return vehicle to get it back'):format(result.deposit),
+            description = ('$%d deposit taken - return within 30 min to get it back'):format(result.deposit),
             type = 'success',
         })
+
+        -- Start timeout monitoring
+        startVehicleTimeoutMonitor()
+
+        -- Start return zone marker thread
+        startReturnZoneMarkerThread()
 
         -- Warp player into vehicle
         TaskWarpPedIntoVehicle(cache.ped, deliveryVehicle, -1)
@@ -268,7 +440,7 @@ local function spawnDeliveryVehicle(locationData)
     end
 
     SetModelAsNoLongerNeeded(modelHash)
-    lib.callback.await('free-restaurants:server:returnDeliveryVehicle', false)
+    lib.callback.await('free-restaurants:server:returnDeliveryVehicle', false, false, true)
     return false
 end
 
@@ -279,26 +451,55 @@ local function returnDeliveryVehicle(locationData)
     if not deliveryVehicle or not DoesEntityExist(deliveryVehicle) then
         deliveryVehicle = nil
         deliveryVehicleDeposit = 0
+        deliveryVehicleLocationKey = nil
+        deliveryVehicleLocationData = nil
         return false
     end
 
-    -- Check if player is near return point
-    if locationData and locationData.delivery and locationData.delivery.returnPoint then
-        local returnCoords = locationData.delivery.returnPoint.coords
-        local playerCoords = GetEntityCoords(cache.ped)
-        local distance = #(playerCoords - returnCoords)
+    -- Use stored location data if not provided
+    locationData = locationData or deliveryVehicleLocationData
 
-        if distance > 50.0 then
-            lib.notify({
-                title = 'Too Far',
-                description = 'Return the vehicle to the restaurant',
-                type = 'warning',
-            })
+    -- Check if vehicle is in return zone
+    local returnCoords = nil
+    if locationData and locationData.delivery and locationData.delivery.returnPoint then
+        returnCoords = locationData.delivery.returnPoint.coords
+    end
+
+    local inReturnZone = isVehicleInReturnZone(deliveryVehicle, returnCoords)
+
+    if not inReturnZone then
+        lib.notify({
+            title = 'Not in Return Zone',
+            description = 'Drive the vehicle into the green return zone',
+            type = 'warning',
+        })
+
+        -- Set waypoint to return zone if we have coords
+        if returnCoords then
+            SetNewWaypoint(returnCoords.x, returnCoords.y)
+        end
+        return false
+    end
+
+    -- Check if vehicle is damaged
+    local isDamaged = isVehicleDamaged(deliveryVehicle)
+
+    -- Confirm if damaged (partial refund)
+    if isDamaged then
+        local confirm = lib.alertDialog({
+            header = 'Vehicle Damaged',
+            content = ('The vehicle is damaged. You will only receive half of your deposit ($%d).\n\nProceed with return?'):format(math.floor(deliveryVehicleDeposit / 2)),
+            centered = true,
+            cancel = true,
+        })
+
+        if confirm ~= 'confirm' then
             return false
         end
     end
 
     -- Delete vehicle
+    lib.hideTextUI()
     if IsPedInVehicle(cache.ped, deliveryVehicle, false) then
         TaskLeaveVehicle(cache.ped, deliveryVehicle, 0)
         Wait(1500)
@@ -307,17 +508,33 @@ local function returnDeliveryVehicle(locationData)
     DeleteEntity(deliveryVehicle)
     deliveryVehicle = nil
 
-    -- Get deposit back
-    local success, amount = lib.callback.await('free-restaurants:server:returnDeliveryVehicle', false)
+    -- Get deposit back (pass damage and zone status to server)
+    local success, amount, message = lib.callback.await('free-restaurants:server:returnDeliveryVehicle', false, isDamaged, true)
 
     if success then
-        lib.notify({
-            title = 'Deposit Refunded',
-            description = ('$%d returned'):format(amount),
-            type = 'success',
-        })
+        if isDamaged then
+            lib.notify({
+                title = 'Partial Refund',
+                description = ('$%d returned (damage deduction applied)'):format(amount),
+                type = 'warning',
+            })
+        else
+            lib.notify({
+                title = 'Deposit Refunded',
+                description = ('$%d returned'):format(amount),
+                type = 'success',
+            })
+        end
         deliveryVehicleDeposit = 0
+        deliveryVehicleLocationKey = nil
+        deliveryVehicleLocationData = nil
         return true
+    else
+        lib.notify({
+            title = 'Return Failed',
+            description = message or 'Could not return vehicle',
+            type = 'error',
+        })
     end
 
     return false
@@ -596,7 +813,7 @@ acceptDelivery = function(delivery, locationKey, locationData)
         local vehicleChoice = showVehicleChoiceDialog(locationData)
 
         if vehicleChoice == 'vehicle' then
-            local spawned = spawnDeliveryVehicle(locationData)
+            local spawned = spawnDeliveryVehicle(locationKey, locationData)
             if not spawned then
                 lib.notify({
                     title = 'Using Own Vehicle',
@@ -1017,9 +1234,18 @@ AddEventHandler('onResourceStop', function(resourceName)
     deleteCustomerNpc()
     stopCountdownNotifications()
 
+    -- Stop timeout monitoring thread
+    vehicleTimeoutThread = nil
+
     if deliveryVehicle and DoesEntityExist(deliveryVehicle) then
         DeleteEntity(deliveryVehicle)
     end
+
+    -- Clean up all vehicle state
+    deliveryVehicle = nil
+    deliveryVehicleDeposit = 0
+    deliveryVehicleLocationKey = nil
+    deliveryVehicleLocationData = nil
 end)
 
 -- Command to check active delivery
@@ -1053,24 +1279,8 @@ RegisterCommand('returndeliveryvehicle', function()
                 type = 'warning',
             })
         else
-            -- Find nearest restaurant location for return
-            local playerCoords = GetEntityCoords(cache.ped)
-            -- Simple return without location check for command
-            if IsPedInVehicle(cache.ped, deliveryVehicle, false) then
-                TaskLeaveVehicle(cache.ped, deliveryVehicle, 0)
-                Wait(1500)
-            end
-            DeleteEntity(deliveryVehicle)
-            deliveryVehicle = nil
-
-            local success, amount = lib.callback.await('free-restaurants:server:returnDeliveryVehicle', false)
-            if success then
-                lib.notify({
-                    title = 'Vehicle Returned',
-                    description = ('$%d deposit refunded'):format(amount),
-                    type = 'success',
-                })
-            end
+            -- Use the proper return function which checks zone and damage
+            returnDeliveryVehicle(deliveryVehicleLocationData)
         end
     else
         lib.notify({
