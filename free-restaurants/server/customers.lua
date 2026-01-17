@@ -863,20 +863,20 @@ end
 ---@return boolean ready
 ---@return string|nil orderId
 local function isDeliveryOrderReady(deliveryId)
-    local orderId = ('DEL-%s'):format(deliveryId)
-    local order = activeOrders[orderId]
+    -- deliveryId already has DEL prefix, use it directly as orderId
+    local order = activeOrders[deliveryId]
 
     if not order then return false, nil end
 
-    return order.status == 'ready', orderId
+    return order.status == 'ready', deliveryId
 end
 
 --- Get delivery order by delivery ID
 ---@param deliveryId string
 ---@return table|nil order
 local function getDeliveryOrder(deliveryId)
-    local orderId = ('DEL-%s'):format(deliveryId)
-    return activeOrders[orderId]
+    -- deliveryId already has DEL prefix, use it directly as orderId
+    return activeOrders[deliveryId]
 end
 
 -- ============================================================================
