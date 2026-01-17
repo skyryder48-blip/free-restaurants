@@ -320,34 +320,58 @@ Config.Orders = {
     -- NPC Delivery System (e.g., food delivery app orders)
     Delivery = {
         enabled = true,                 -- Toggle NPC delivery orders
-        
+
         -- Order Generation
         spawnRate = {
             minimum = 5,                -- Minimum minutes between delivery orders
             maximum = 15,               -- Maximum minutes between delivery orders
-            rushMultiplier = 0.5,       -- Spawn rate multiplier during rush (faster)
         },
-        
+
         -- Order Size (smaller than catering)
         orderSize = {
             minimum = 1,
             maximum = 5,
         },
-        
+
         -- Delivery Requirements
         requirements = {
             timeLimit = 20,             -- Minutes to complete delivery
-            vehicleRequired = true,     -- Must use a vehicle
+            vehicleRequired = false,    -- Suggest using vehicle but don't require
             allowedVehicles = {},       -- Empty = any vehicle, or specify models
         },
-        
+
         -- Payment
         payment = {
             basePerItem = 15,           -- Base pay per item delivered
-            distanceBonus = 0.5,        -- Bonus per 100m distance
+            distanceBonus = 0.5,        -- Bonus per 100m distance ($0.50 per 100m)
             tipChance = 0.7,            -- 70% chance of customer tip
             tipRange = { min = 5, max = 25 },
         },
+    },
+}
+
+-- ============================================================================
+-- DELIVERY VEHICLE SETTINGS
+-- ============================================================================
+
+Config.Delivery = {
+    -- Vehicle Settings
+    vehicle = {
+        enabled = true,                 -- Allow company delivery vehicles
+        model = 'faggio3',              -- Default delivery vehicle model
+        deposit = 500,                  -- Deposit required (refunded on return)
+    },
+
+    -- Customer NPC Settings
+    customerNpc = {
+        enabled = true,                 -- Spawn NPC at delivery destination
+        despawnDelay = 2000,            -- MS delay before NPC disappears after delivery
+    },
+
+    -- Time Notifications
+    notifications = {
+        enabled = true,                 -- Enable countdown notifications
+        intervals = { 600, 300, 120, 60, 30 }, -- Seconds remaining to notify
     },
 }
 
@@ -770,57 +794,14 @@ Config.Immersion = {
 }
 
 -- ============================================================================
--- RUSH HOUR SETTINGS
+-- RUSH HOUR SETTINGS (DEPRECATED - Removed for simplicity)
 -- ============================================================================
+-- Rush hour mechanics have been removed from the delivery system.
+-- Order frequency is now consistent throughout the day.
+-- Future versions may reintroduce dynamic busy periods with improved mechanics.
 
 Config.RushHour = {
-    enabled = true,                     -- Toggle rush hour mechanics
-    
-    -- Time Periods (24-hour format)
-    periods = {
-        breakfast = {
-            enabled = true,
-            start = 7,                  -- 7:00 AM
-            finish = 10,                -- 10:00 AM
-            multiplier = 1.5,           -- Order frequency multiplier
-        },
-        lunch = {
-            enabled = true,
-            start = 11,                 -- 11:00 AM
-            finish = 14,                -- 2:00 PM
-            multiplier = 2.0,
-        },
-        dinner = {
-            enabled = true,
-            start = 17,                 -- 5:00 PM
-            finish = 21,                -- 9:00 PM
-            multiplier = 2.5,
-        },
-        latenight = {
-            enabled = true,
-            start = 22,                 -- 10:00 PM
-            finish = 2,                 -- 2:00 AM (next day)
-            multiplier = 1.5,
-        },
-    },
-    
-    -- Rush Hour Effects
-    effects = {
-        orderFrequency = true,          -- More frequent orders
-        reducedPatience = true,         -- Customers less patient
-        patienceReduction = 0.3,        -- 30% less patience
-        tipBonus = true,                -- Better tips during rush
-        tipBonusMultiplier = 1.25,      -- 25% better tips
-        stressIncrease = true,          -- Increases player stress
-        stressRate = 1.5,               -- Stress accumulation multiplier
-    },
-    
-    -- Notifications
-    notifications = {
-        rushStarting = true,            -- Notify when rush hour begins
-        rushEnding = true,              -- Notify when rush hour ends
-        advanceWarning = 5,             -- Minutes warning before rush
-    },
+    enabled = false,                    -- Rush hour mechanics disabled
 }
 
 -- ============================================================================
