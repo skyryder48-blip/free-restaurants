@@ -393,10 +393,22 @@ end
 -- DELIVERY UI
 -- ============================================================================
 
+-- Forward declarations for mutually recursive functions
+local showDeliveryMenu
+local showDeliveryDetails
+local requestNewDelivery
+local acceptDelivery
+local waitForPickup
+local attemptPickup
+local trackDeliveryProgress
+local arriveAtDestination
+local completeDelivery
+local cancelActiveDelivery
+
 --- Show available deliveries menu
 ---@param locationKey string
 ---@param locationData table
-local function showDeliveryMenu(locationKey, locationData)
+showDeliveryMenu = function(locationKey, locationData)
     -- Get available deliveries
     local deliveries = lib.callback.await('free-restaurants:server:getAvailableDeliveries', false, locationData.job)
 
@@ -466,7 +478,7 @@ end
 ---@param delivery table
 ---@param locationKey string
 ---@param locationData table
-local function showDeliveryDetails(delivery, locationKey, locationData)
+showDeliveryDetails = function(delivery, locationKey, locationData)
     local dest = delivery.destination
 
     local itemList = {}
@@ -530,7 +542,7 @@ end
 --- Request a new delivery
 ---@param locationKey string
 ---@param locationData table
-local function requestNewDelivery(locationKey, locationData)
+requestNewDelivery = function(locationKey, locationData)
     lib.showTextUI('Requesting delivery...', { icon = 'spinner' })
 
     local delivery, error = lib.callback.await('free-restaurants:server:requestDelivery', false, locationKey)
@@ -562,7 +574,7 @@ end
 ---@param delivery table
 ---@param locationKey string
 ---@param locationData table
-local function acceptDelivery(delivery, locationKey, locationData)
+acceptDelivery = function(delivery, locationKey, locationData)
     local success = lib.callback.await('free-restaurants:server:acceptDelivery', false, delivery.id)
 
     if success then
@@ -610,7 +622,7 @@ end
 --- Wait for player to pick up items
 ---@param locationKey string
 ---@param locationData table
-local function waitForPickup(locationKey, locationData)
+waitForPickup = function(locationKey, locationData)
     while activeDelivery and activeDelivery.status == 'accepted' do
         Wait(100)
 
@@ -623,7 +635,7 @@ local function waitForPickup(locationKey, locationData)
 end
 
 --- Attempt to pick up delivery items
-local function attemptPickup()
+attemptPickup = function()
     if not activeDelivery then return end
 
     lib.showTextUI('Picking up items...', { icon = 'spinner' })
@@ -668,7 +680,7 @@ local function attemptPickup()
 end
 
 --- Track delivery progress and arrival
-local function trackDeliveryProgress()
+trackDeliveryProgress = function()
     while activeDelivery and activeDelivery.status == 'picked_up' do
         Wait(500)
 
@@ -691,7 +703,7 @@ local function trackDeliveryProgress()
 end
 
 --- Handle arrival at destination
-local function arriveAtDestination()
+arriveAtDestination = function()
     if not activeDelivery then return end
 
     -- Stop countdown
@@ -734,7 +746,7 @@ local function arriveAtDestination()
 end
 
 --- Complete the delivery
-local function completeDelivery()
+completeDelivery = function()
     if not activeDelivery then return end
 
     -- Play customer receive animation first
@@ -809,7 +821,7 @@ local function completeDelivery()
 end
 
 --- Cancel active delivery
-local function cancelActiveDelivery()
+cancelActiveDelivery = function()
     if not activeDelivery then return end
 
     local confirm = lib.alertDialog({
