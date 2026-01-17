@@ -333,14 +333,14 @@ local function startCountdownNotifications(timeLimit)
     -- Stop existing thread
     stopCountdownNotifications()
 
-    local startTime = os.time()
+    local startTime = GetGameTimer()
     local notified = {}
 
     countdownThread = CreateThread(function()
         while activeDelivery and activeDelivery.status == 'picked_up' do
             Wait(5000) -- Check every 5 seconds
 
-            local elapsed = os.time() - startTime
+            local elapsed = (GetGameTimer() - startTime) / 1000 -- Convert to seconds
             local remaining = timeLimit - elapsed
 
             -- Key notification intervals
@@ -430,7 +430,8 @@ local function showDeliveryMenu(locationKey, locationData)
     else
         for _, delivery in ipairs(deliveries) do
             local dest = delivery.destination
-            local timeLeft = delivery.expiresAt - os.time()
+            -- timeRemaining is calculated server-side and passed with delivery data
+            local timeLeft = delivery.timeRemaining or 600
             local timeStr = timeLeft > 60 and ('%dm'):format(math.floor(timeLeft / 60)) or ('%ds'):format(timeLeft)
             local distanceStr = delivery.distance and ('%.1f km'):format(delivery.distance / 1000) or 'Unknown'
 
