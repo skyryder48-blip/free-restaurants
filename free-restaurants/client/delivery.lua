@@ -616,8 +616,6 @@ local showDeliveryDetails
 local requestNewDelivery
 local acceptDelivery
 local waitForOrderReady
-local waitForPickup
-local attemptPickup
 local trackDeliveryProgress
 local arriveAtDestination
 local completeDelivery
@@ -836,7 +834,7 @@ acceptDelivery = function(delivery, locationKey, locationData)
     end
 end
 
---- Wait for order to be ready for pickup
+--- Wait for order to be ready, then start delivery tracking
 ---@param locationKey string
 ---@param locationData table
 waitForOrderReady = function(locationKey, locationData)
@@ -855,81 +853,46 @@ waitForOrderReady = function(locationKey, locationData)
                 lib.showTextUI('Kitchen is preparing your order...', { icon = 'fire' })
             elseif status == 'ready' then
                 lib.hideTextUI()
-                lib.notify({
-                    title = 'Order Ready!',
-                    description = 'Pick up items from the packaging station',
-                    type = 'success',
-                    duration = 5000,
-                })
-                PlaySoundFrontend(-1, 'PICK_UP', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
 
-                -- Set GPS waypoint to delivery destination now
-                local dest = activeDelivery.destination
-                setDeliveryWaypoint(dest.coords, dest.label)
+                -- Mark delivery as ready on server (transitions to picked_up status)
+                local success, err = lib.callback.await('free-restaurants:server:pickupDelivery', false, activeDelivery.id)
 
-                -- Now wait for pickup
-                waitForPickup(locationKey, locationData)
+                if success then
+                    activeDelivery.status = 'picked_up'
+
+                    lib.notify({
+                        title = 'Order Ready!',
+                        description = 'Deliver to the customer - follow your GPS',
+                        type = 'success',
+                        duration = 5000,
+                    })
+                    PlaySoundFrontend(-1, 'PICK_UP', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
+
+                    -- Set GPS waypoint to delivery destination
+                    local dest = activeDelivery.destination
+                    setDeliveryWaypoint(dest.coords, dest.label)
+
+                    -- Start countdown notifications
+                    local timeLimit = activeDelivery.timeLimit or 1200 -- Default 20 minutes
+                    startCountdownNotifications(timeLimit)
+
+                    -- Start delivery tracking directly (NPC spawns on arrival)
+                    CreateThread(function()
+                        trackDeliveryProgress()
+                    end)
+                else
+                    lib.notify({
+                        title = 'Error',
+                        description = err or 'Failed to start delivery',
+                        type = 'error',
+                    })
+                end
                 return
             end
         end
     end
 
     lib.hideTextUI()
-end
-
---- Wait for player to pick up items from pickup area
----@param locationKey string
----@param locationData table
-waitForPickup = function(locationKey, locationData)
-    lib.showTextUI('[E] Pick up delivery items from packaging station', { icon = 'box' })
-
-    while activeDelivery and activeDelivery.status == 'accepted' do
-        Wait(100)
-
-        if IsControlJustPressed(0, 38) then -- E key
-            attemptPickup()
-        end
-    end
-
-    lib.hideTextUI()
-end
-
---- Attempt to pick up delivery items from pickup stash
-attemptPickup = function()
-    if not activeDelivery then return end
-
-    lib.showTextUI('Picking up items...', { icon = 'spinner' })
-
-    local success, error = lib.callback.await('free-restaurants:server:pickupDelivery', false, activeDelivery.id)
-
-    lib.hideTextUI()
-
-    if success then
-        activeDelivery.status = 'picked_up'
-
-        lib.notify({
-            title = 'Items Collected',
-            description = 'Head to the delivery location - follow your GPS',
-            type = 'success',
-        })
-
-        -- Start countdown notifications
-        local timeLimit = activeDelivery.timeLimit or 1200 -- Default 20 minutes
-        startCountdownNotifications(timeLimit)
-
-        -- NPC will be spawned when player arrives at destination (can't spawn at distance)
-
-        -- Start delivery tracking
-        CreateThread(function()
-            trackDeliveryProgress()
-        end)
-    else
-        lib.notify({
-            title = 'Pickup Failed',
-            description = error or 'Items not ready for pickup',
-            type = 'error',
-        })
-    end
 end
 
 --- Track delivery progress and arrival
