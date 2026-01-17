@@ -106,6 +106,103 @@ local function showRecipeUnlock(recipes)
 end
 
 -- ============================================================================
+-- PROGRESSION UI HELPERS (must be defined before showProgressionMenu)
+-- ============================================================================
+
+--- Build ASCII progress bar
+---@param progress number 0-100
+---@return string
+local function buildProgressBar(progress)
+    local filled = math.floor(progress / 10)
+    local empty = 10 - filled
+    return string.rep('█', filled) .. string.rep('░', empty)
+end
+
+--- Show skills submenu
+---@param skills table
+local function showSkillsMenu(skills)
+    local options = {}
+
+    local skillLabels = {
+        general = 'General Cooking',
+        grill = 'Grilling',
+        fry = 'Frying',
+        bake = 'Baking',
+        prep = 'Food Prep',
+        plate = 'Plating',
+        blend = 'Blending',
+        coffee = 'Coffee Making',
+        cocktails = 'Mixology',
+        delivery = 'Delivery',
+    }
+
+    for category, skillData in pairs(skills) do
+        local label = skillLabels[category] or category:gsub('^%l', string.upper)
+
+        table.insert(options, {
+            title = label,
+            description = ('Level %d (%d points)'):format(skillData.level, skillData.points),
+            icon = 'utensils',
+            progress = math.min(100, (skillData.points % 10) * 10),
+        })
+    end
+
+    -- Sort alphabetically
+    table.sort(options, function(a, b) return a.title < b.title end)
+
+    lib.registerContext({
+        id = 'skills_menu',
+        title = 'Cooking Skills',
+        menu = 'progression_menu',
+        options = options,
+    })
+
+    lib.showContext('skills_menu')
+end
+
+--- Show leaderboard
+local function showLeaderboard()
+    local leaderboard = lib.callback.await('free-restaurants:server:getLeaderboard', false, 10)
+
+    if not leaderboard or #leaderboard == 0 then
+        lib.notify({
+            title = 'Leaderboard',
+            description = 'No data available',
+            type = 'inform',
+        })
+        return
+    end
+
+    local options = {}
+
+    for _, entry in ipairs(leaderboard) do
+        local medal = ''
+        if entry.rank == 1 then medal = '🥇 '
+        elseif entry.rank == 2 then medal = '🥈 '
+        elseif entry.rank == 3 then medal = '🥉 '
+        end
+
+        table.insert(options, {
+            title = ('%s#%d %s'):format(medal, entry.rank, entry.name),
+            description = ('Level %d - %d crafts'):format(entry.level, entry.crafts),
+            icon = 'user',
+            metadata = {
+                { label = 'Total XP', value = tostring(entry.xp) },
+            },
+        })
+    end
+
+    lib.registerContext({
+        id = 'leaderboard_menu',
+        title = 'Top Chefs',
+        menu = 'progression_menu',
+        options = options,
+    })
+
+    lib.showContext('leaderboard_menu')
+end
+
+-- ============================================================================
 -- PROGRESSION UI
 -- ============================================================================
 
@@ -203,99 +300,6 @@ local function showProgressionMenu()
     })
     
     lib.showContext('progression_menu')
-end
-
---- Build ASCII progress bar
----@param progress number 0-100
----@return string
-local function buildProgressBar(progress)
-    local filled = math.floor(progress / 10)
-    local empty = 10 - filled
-    return string.rep('█', filled) .. string.rep('░', empty)
-end
-
---- Show skills submenu
----@param skills table
-local function showSkillsMenu(skills)
-    local options = {}
-    
-    local skillLabels = {
-        general = 'General Cooking',
-        grill = 'Grilling',
-        fry = 'Frying',
-        bake = 'Baking',
-        prep = 'Food Prep',
-        plate = 'Plating',
-        blend = 'Blending',
-        coffee = 'Coffee Making',
-        cocktails = 'Mixology',
-        delivery = 'Delivery',
-    }
-    
-    for category, skillData in pairs(skills) do
-        local label = skillLabels[category] or category:gsub('^%l', string.upper)
-        
-        table.insert(options, {
-            title = label,
-            description = ('Level %d (%d points)'):format(skillData.level, skillData.points),
-            icon = 'utensils',
-            progress = math.min(100, (skillData.points % 10) * 10),
-        })
-    end
-    
-    -- Sort alphabetically
-    table.sort(options, function(a, b) return a.title < b.title end)
-    
-    lib.registerContext({
-        id = 'skills_menu',
-        title = 'Cooking Skills',
-        menu = 'progression_menu',
-        options = options,
-    })
-    
-    lib.showContext('skills_menu')
-end
-
---- Show leaderboard
-local function showLeaderboard()
-    local leaderboard = lib.callback.await('free-restaurants:server:getLeaderboard', false, 10)
-    
-    if not leaderboard or #leaderboard == 0 then
-        lib.notify({
-            title = 'Leaderboard',
-            description = 'No data available',
-            type = 'inform',
-        })
-        return
-    end
-    
-    local options = {}
-    
-    for _, entry in ipairs(leaderboard) do
-        local medal = ''
-        if entry.rank == 1 then medal = '🥇 '
-        elseif entry.rank == 2 then medal = '🥈 '
-        elseif entry.rank == 3 then medal = '🥉 '
-        end
-        
-        table.insert(options, {
-            title = ('%s#%d %s'):format(medal, entry.rank, entry.name),
-            description = ('Level %d - %d crafts'):format(entry.level, entry.crafts),
-            icon = 'user',
-            metadata = {
-                { label = 'Total XP', value = tostring(entry.xp) },
-            },
-        })
-    end
-    
-    lib.registerContext({
-        id = 'leaderboard_menu',
-        title = 'Top Chefs',
-        menu = 'progression_menu',
-        options = options,
-    })
-    
-    lib.showContext('leaderboard_menu')
 end
 
 -- ============================================================================
