@@ -808,8 +808,8 @@ local function createDeliveryOrder(job, locationKey, deliveryId, items, destinat
     local employee = exports.qbx_core:GetPlayer(employeeSource)
     if not employee then return nil, 'Invalid employee' end
 
-    -- Generate order ID with delivery prefix
-    local orderId = ('DEL-%s'):format(deliveryId)
+    -- Use delivery ID directly as order ID (already has DEL prefix)
+    local orderId = deliveryId
 
     -- Create order record (no payment processing)
     local orderData = {
