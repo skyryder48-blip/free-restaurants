@@ -86,6 +86,40 @@ local function getLevelBonuses(level)
 end
 
 -- ============================================================================
+-- RECIPE UNLOCKS
+-- ============================================================================
+
+--- Check and unlock recipes for level
+---@param source number
+---@param citizenid string
+---@param level number
+local function checkRecipeUnlocks(source, citizenid, level)
+    local data = exports['free-restaurants']:GetPlayerRestaurantData(citizenid)
+    data.unlockedRecipes = data.unlockedRecipes or {}
+
+    local newUnlocks = {}
+
+    for recipeId, recipe in pairs(Config.Recipes) do
+        -- Check if recipe unlocks at this level
+        if recipe.unlockAtLevel and recipe.unlockAtLevel == level then
+            if not tableContains(data.unlockedRecipes, recipeId) then
+                table.insert(data.unlockedRecipes, recipeId)
+                table.insert(newUnlocks, {
+                    id = recipeId,
+                    label = recipe.label,
+                })
+            end
+        end
+    end
+
+    if #newUnlocks > 0 then
+        exports['free-restaurants']:SavePlayerRestaurantData(citizenid, data)
+
+        TriggerClientEvent('free-restaurants:client:recipesUnlocked', source, newUnlocks)
+    end
+end
+
+-- ============================================================================
 -- XP AWARDING
 -- ============================================================================
 
@@ -154,38 +188,8 @@ local function awardXP(source, amount, reason, category)
 end
 
 -- ============================================================================
--- RECIPE UNLOCKS
+-- MANUAL RECIPE UNLOCKS
 -- ============================================================================
-
---- Check and unlock recipes for level
----@param source number
----@param citizenid string
----@param level number
-local function checkRecipeUnlocks(source, citizenid, level)
-    local data = exports['free-restaurants']:GetPlayerRestaurantData(citizenid)
-    data.unlockedRecipes = data.unlockedRecipes or {}
-    
-    local newUnlocks = {}
-    
-    for recipeId, recipe in pairs(Config.Recipes) do
-        -- Check if recipe unlocks at this level
-        if recipe.unlockAtLevel and recipe.unlockAtLevel == level then
-            if not tableContains(data.unlockedRecipes, recipeId) then
-                table.insert(data.unlockedRecipes, recipeId)
-                table.insert(newUnlocks, {
-                    id = recipeId,
-                    label = recipe.label,
-                })
-            end
-        end
-    end
-    
-    if #newUnlocks > 0 then
-        exports['free-restaurants']:SavePlayerRestaurantData(citizenid, data)
-        
-        TriggerClientEvent('free-restaurants:client:recipesUnlocked', source, newUnlocks)
-    end
-end
 
 --- Manually unlock a recipe
 ---@param citizenid string
