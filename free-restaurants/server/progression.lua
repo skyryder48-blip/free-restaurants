@@ -14,6 +14,21 @@
 ]]
 
 -- ============================================================================
+-- HELPER FUNCTIONS
+-- ============================================================================
+
+--- Check if table contains value
+---@param tbl table
+---@param value any
+---@return boolean
+local function tableContains(tbl, value)
+    for _, v in ipairs(tbl) do
+        if v == value then return true end
+    end
+    return false
+end
+
+-- ============================================================================
 -- LEVEL CONFIGURATION
 -- ============================================================================
 
@@ -209,14 +224,6 @@ local function unlockRecipe(citizenid, recipeId)
     return true
 end
 
--- Helper
-local function tableContains(tbl, value)
-    for _, v in ipairs(tbl) do
-        if v == value then return true end
-    end
-    return false
-end
-
 -- ============================================================================
 -- SKILL SYSTEM
 -- ============================================================================
@@ -348,6 +355,91 @@ lib.callback.register('free-restaurants:server:getLeaderboard', function(source,
 end)
 
 -- ============================================================================
+-- COMMANDS
+-- ============================================================================
+
+--- /kitchenskills - Display player's cooking skills and progression
+RegisterCommand('kitchenskills', function(source, args)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return end
+
+    local citizenid = player.PlayerData.citizenid
+    local data = exports['free-restaurants']:GetPlayerRestaurantData(citizenid)
+    local level, currentLevelXp, nextLevelXp = calculateLevelFromXP(data.cookingXp)
+    local bonuses = getLevelBonuses(level)
+    local skills = getAllSkills(citizenid)
+
+    -- Calculate progress percentage
+    local progressPercent = math.floor((currentLevelXp / nextLevelXp) * 100)
+
+    -- Build skills list
+    local skillLines = {}
+    local skillCategories = {
+        cooking = 'Cooking',
+        grilling = 'Grilling',
+        frying = 'Frying',
+        drinks = 'Drinks',
+        desserts = 'Desserts',
+        delivery = 'Delivery',
+    }
+
+    for category, label in pairs(skillCategories) do
+        local skillData = skills[category]
+        if skillData then
+            table.insert(skillLines, ('  %s: Level %d (%d pts)'):format(label, skillData.level, skillData.points))
+        end
+    end
+
+    -- Format message
+    local message = ('\n=== Kitchen Skills ===\n' ..
+        'Cooking Level: %d\n' ..
+        'XP: %d / %d (%d%%)\n' ..
+        'Total XP: %d\n' ..
+        '\n--- Level Bonuses ---\n' ..
+        '  Quality: +%d%%\n' ..
+        '  Speed: +%.1f%%\n' ..
+        '  XP Gain: +%d%%\n'):format(
+            level,
+            currentLevelXp, nextLevelXp, progressPercent,
+            data.cookingXp,
+            math.floor(bonuses.qualityBonus * 100),
+            bonuses.speedBonus * 100,
+            math.floor(bonuses.xpBonus * 100)
+        )
+
+    if #skillLines > 0 then
+        message = message .. '\n--- Skill Categories ---\n' .. table.concat(skillLines, '\n')
+    end
+
+    -- Stats
+    message = message .. ('\n\n--- Statistics ---\n' ..
+        '  Total Crafts: %d\n' ..
+        '  Total Orders: %d\n' ..
+        '  Total Tips: $%d\n' ..
+        '  Recipes Unlocked: %d\n'):format(
+            data.totalCrafts or 0,
+            data.totalOrders or 0,
+            data.totalTips or 0,
+            data.unlockedRecipes and #data.unlockedRecipes or 0
+        )
+
+    -- Send as chat message
+    TriggerClientEvent('chat:addMessage', source, {
+        color = { 255, 200, 100 },
+        multiline = true,
+        args = { 'Kitchen Skills', message }
+    })
+
+    -- Also show a notification summary
+    TriggerClientEvent('ox_lib:notify', source, {
+        title = 'Kitchen Level ' .. level,
+        description = ('XP: %d/%d (%d%%)'):format(currentLevelXp, nextLevelXp, progressPercent),
+        type = 'inform',
+        duration = 5000,
+    })
+end, false)
+
+-- ============================================================================
 -- EXPORTS
 -- ============================================================================
 
@@ -355,6 +447,7 @@ exports('AwardXP', awardXP)
 exports('CalculateLevelFromXP', calculateLevelFromXP)
 exports('GetLevelBonuses', getLevelBonuses)
 exports('GetSkillLevel', getSkillLevel)
+exports('GetAllSkills', getAllSkills)
 exports('UnlockRecipe', unlockRecipe)
 
 print('[free-restaurants] server/progression.lua loaded')
