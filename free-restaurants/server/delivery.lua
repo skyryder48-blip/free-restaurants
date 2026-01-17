@@ -30,8 +30,11 @@ local deliveryDestinations = {}
 -- Available catering destinations
 local cateringDestinations = {}
 
--- Vehicle deposits: [source] = { deposit = amount, vehicleNetId = id }
+-- Vehicle deposits: [source] = { deposit = amount, vehicleNetId = id, spawnTime = os.time(), locationKey = key }
 local vehicleDeposits = {}
+
+-- Vehicle timeout in seconds (30 minutes)
+local VEHICLE_TIMEOUT = 30 * 60
 
 -- Helper function (must be defined before use)
 local function tableCount(tbl)
@@ -280,31 +283,93 @@ end
 ---@param source number
 ---@param deposit number
 ---@param vehicleNetId number
-local function registerVehicleDeposit(source, deposit, vehicleNetId)
+---@param locationKey string|nil
+local function registerVehicleDeposit(source, deposit, vehicleNetId, locationKey)
     vehicleDeposits[source] = {
         deposit = deposit,
         vehicleNetId = vehicleNetId,
         createdAt = os.time(),
+        spawnTime = os.time(),
+        locationKey = locationKey,
+        timeout = VEHICLE_TIMEOUT,
     }
 end
 
---- Refund vehicle deposit
+--- Get vehicle deposit info
 ---@param source number
+---@return table|nil
+local function getVehicleDepositInfo(source)
+    local info = vehicleDeposits[source]
+    if not info then return nil end
+
+    -- Calculate time remaining
+    local elapsed = os.time() - info.spawnTime
+    local remaining = info.timeout - elapsed
+
+    return {
+        deposit = info.deposit,
+        vehicleNetId = info.vehicleNetId,
+        spawnTime = info.spawnTime,
+        timeRemaining = remaining,
+        isExpired = remaining <= 0,
+        locationKey = info.locationKey,
+    }
+end
+
+--- Check if vehicle deposit is expired
+---@param source number
+---@return boolean
+local function isVehicleDepositExpired(source)
+    local info = vehicleDeposits[source]
+    if not info then return false end
+
+    local elapsed = os.time() - info.spawnTime
+    return elapsed >= info.timeout
+end
+
+--- Refund vehicle deposit (full or partial based on damage)
+---@param source number
+---@param isDamaged boolean|nil Vehicle is damaged
+---@param inReturnZone boolean|nil Vehicle is in return zone
 ---@return boolean success
 ---@return number amount
-local function refundVehicleDeposit(source)
+---@return string|nil message
+local function refundVehicleDeposit(source, isDamaged, inReturnZone)
     local depositInfo = vehicleDeposits[source]
-    if not depositInfo then return false, 0 end
+    if not depositInfo then return false, 0, 'No deposit found' end
 
-    local player = exports.qbx_core:GetPlayer(source)
-    if player then
-        player.Functions.AddMoney('cash', depositInfo.deposit, 'delivery-vehicle-deposit-refund')
+    -- Check if expired (30 minute timeout)
+    if isVehicleDepositExpired(source) then
+        local lostAmount = depositInfo.deposit
+        vehicleDeposits[source] = nil
+        return false, 0, ('Deposit of $%d forfeited - vehicle not returned in time'):format(lostAmount)
     end
 
-    local amount = depositInfo.deposit
+    -- Check if in return zone (required)
+    if inReturnZone == false then
+        return false, 0, 'Vehicle must be in the return zone'
+    end
+
+    local player = exports.qbx_core:GetPlayer(source)
+    local refundAmount = depositInfo.deposit
+
+    -- If vehicle is damaged, only refund half
+    if isDamaged then
+        refundAmount = math.floor(depositInfo.deposit / 2)
+    end
+
+    if player and refundAmount > 0 then
+        player.Functions.AddMoney('cash', refundAmount, 'delivery-vehicle-deposit-refund')
+    end
+
+    local deduction = depositInfo.deposit - refundAmount
     vehicleDeposits[source] = nil
 
-    return true, amount
+    if isDamaged then
+        return true, refundAmount, ('$%d deducted for vehicle damage'):format(deduction)
+    end
+
+    return true, refundAmount, nil
 end
 
 --- Forfeit vehicle deposit (vehicle destroyed/lost)
@@ -753,15 +818,20 @@ lib.callback.register('free-restaurants:server:spawnDeliveryVehicle', function(s
 end)
 
 --- Register spawned vehicle
-lib.callback.register('free-restaurants:server:registerDeliveryVehicle', function(source, vehicleNetId, deposit)
-    registerVehicleDeposit(source, deposit, vehicleNetId)
+lib.callback.register('free-restaurants:server:registerDeliveryVehicle', function(source, vehicleNetId, deposit, locationKey)
+    registerVehicleDeposit(source, deposit, vehicleNetId, locationKey)
     return true
 end)
 
---- Return delivery vehicle
-lib.callback.register('free-restaurants:server:returnDeliveryVehicle', function(source)
-    local success, amount = refundVehicleDeposit(source)
-    return success, amount
+--- Get vehicle deposit info (for client timeout tracking)
+lib.callback.register('free-restaurants:server:getVehicleDepositInfo', function(source)
+    return getVehicleDepositInfo(source)
+end)
+
+--- Return delivery vehicle with damage/zone validation
+lib.callback.register('free-restaurants:server:returnDeliveryVehicle', function(source, isDamaged, inReturnZone)
+    local success, amount, message = refundVehicleDeposit(source, isDamaged, inReturnZone)
+    return success, amount, message
 end)
 
 --- Forfeit vehicle deposit
