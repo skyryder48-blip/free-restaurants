@@ -551,10 +551,18 @@ lib.callback.register('free-restaurants:server:getAvailableDeliveries', function
     end
 
     local available = {}
+    local currentTime = os.time()
+
     for id, delivery in pairs(activeDeliveries) do
         if delivery.job == job and delivery.status == 'pending' then
-            if os.time() < delivery.expiresAt then
-                table.insert(available, delivery)
+            if currentTime < delivery.expiresAt then
+                -- Create a copy with time remaining calculated
+                local deliveryCopy = {}
+                for k, v in pairs(delivery) do
+                    deliveryCopy[k] = v
+                end
+                deliveryCopy.timeRemaining = delivery.expiresAt - currentTime
+                table.insert(available, deliveryCopy)
             else
                 -- Expired, clean up
                 activeDeliveries[id] = nil
