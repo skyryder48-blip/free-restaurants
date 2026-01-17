@@ -437,11 +437,19 @@ end
 ---@return string|nil status
 local function isDeliveryReady(deliveryId)
     local delivery = activeDeliveries[deliveryId]
-    if not delivery then return false, 'not_found' end
+    if not delivery then
+        print(('[free-restaurants] isDeliveryReady: delivery %s not found in activeDeliveries'):format(deliveryId))
+        return false, 'not_found'
+    end
 
     -- Check KDS order status
     local kdsOrder = exports['free-restaurants']:GetDeliveryOrder(deliveryId)
-    if not kdsOrder then return false, 'no_kds_order' end
+    if not kdsOrder then
+        print(('[free-restaurants] isDeliveryReady: KDS order not found for delivery %s'):format(deliveryId))
+        return false, 'no_kds_order'
+    end
+
+    print(('[free-restaurants] isDeliveryReady: delivery %s, KDS order status = %s'):format(deliveryId, kdsOrder.status))
 
     if kdsOrder.status == 'ready' then
         return true, 'ready'
