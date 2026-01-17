@@ -98,11 +98,13 @@ end
 -- DELIVERY GENERATION
 -- ============================================================================
 
---- Generate a delivery ID
+--- Generate a delivery ID (timestamp-based to ensure uniqueness across restarts)
 ---@return string
 local function generateDeliveryId()
     deliveryCounter = deliveryCounter + 1
-    return ('DEL%06d'):format(deliveryCounter)
+    -- Use last 4 digits of timestamp + counter to create unique ID
+    local timestamp = os.time() % 10000
+    return ('D%04d%03d'):format(timestamp, deliveryCounter % 1000)
 end
 
 --- Get random delivery destination
