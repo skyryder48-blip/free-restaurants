@@ -50,6 +50,17 @@ local customerModels = {
 -- GPS & WAYPOINT MANAGEMENT
 -- ============================================================================
 
+--- Clear delivery waypoint
+local function clearDeliveryWaypoint()
+    if deliveryBlip and DoesBlipExist(deliveryBlip) then
+        RemoveBlip(deliveryBlip)
+        deliveryBlip = nil
+    end
+
+    -- Clear GPS route
+    SetWaypointOff()
+end
+
 --- Set delivery waypoint
 ---@param coords vector3
 ---@param label string
@@ -72,20 +83,17 @@ local function setDeliveryWaypoint(coords, label)
     SetNewWaypoint(coords.x, coords.y)
 end
 
---- Clear delivery waypoint
-local function clearDeliveryWaypoint()
-    if deliveryBlip and DoesBlipExist(deliveryBlip) then
-        RemoveBlip(deliveryBlip)
-        deliveryBlip = nil
-    end
-
-    -- Clear GPS route
-    SetWaypointOff()
-end
-
 -- ============================================================================
 -- CUSTOMER NPC MANAGEMENT
 -- ============================================================================
+
+--- Delete customer NPC
+local function deleteCustomerNpc()
+    if customerNpc and DoesEntityExist(customerNpc) then
+        DeleteEntity(customerNpc)
+        customerNpc = nil
+    end
+end
 
 --- Spawn customer NPC at delivery destination
 ---@param coords vector3
@@ -136,14 +144,6 @@ local function spawnCustomerNpc(coords, heading)
 
     SetModelAsNoLongerNeeded(modelHash)
     return nil
-end
-
---- Delete customer NPC
-local function deleteCustomerNpc()
-    if customerNpc and DoesEntityExist(customerNpc) then
-        DeleteEntity(customerNpc)
-        customerNpc = nil
-    end
 end
 
 --- Play customer receive animation
@@ -544,6 +544,11 @@ end
 -- TIME COUNTDOWN NOTIFICATIONS
 -- ============================================================================
 
+--- Stop countdown notification thread
+local function stopCountdownNotifications()
+    countdownThread = nil
+end
+
 --- Start countdown notification thread
 ---@param timeLimit number Time limit in seconds
 local function startCountdownNotifications(timeLimit)
@@ -599,11 +604,6 @@ local function startCountdownNotifications(timeLimit)
             end
         end
     end)
-end
-
---- Stop countdown notification thread
-local function stopCountdownNotifications()
-    countdownThread = nil
 end
 
 -- ============================================================================
