@@ -876,7 +876,19 @@ end
 ---@return table|nil order
 local function getDeliveryOrder(deliveryId)
     -- deliveryId already has DEL prefix, use it directly as orderId
-    return activeOrders[deliveryId]
+    local order = activeOrders[deliveryId]
+    if order then
+        print(('[free-restaurants] getDeliveryOrder: found order %s with status %s'):format(deliveryId, order.status))
+    else
+        print(('[free-restaurants] getDeliveryOrder: order %s NOT found in activeOrders'):format(deliveryId))
+        -- Debug: print all active order IDs
+        local orderIds = {}
+        for id, _ in pairs(activeOrders) do
+            table.insert(orderIds, id)
+        end
+        print(('[free-restaurants] getDeliveryOrder: active orders: %s'):format(table.concat(orderIds, ', ')))
+    end
+    return order
 end
 
 -- ============================================================================
