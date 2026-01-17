@@ -792,6 +792,94 @@ CreateThread(function()
 end)
 
 -- ============================================================================
+-- DELIVERY ORDER CREATION
+-- ============================================================================
+
+--- Create a delivery order (no payment required - goes to KDS for cooking)
+---@param job string
+---@param locationKey string
+---@param deliveryId string
+---@param items table
+---@param destination table
+---@param employeeSource number The delivery driver who accepted
+---@return string|nil orderId
+---@return string|nil error
+local function createDeliveryOrder(job, locationKey, deliveryId, items, destination, employeeSource)
+    local employee = exports.qbx_core:GetPlayer(employeeSource)
+    if not employee then return nil, 'Invalid employee' end
+
+    -- Generate order ID with delivery prefix
+    local orderId = ('DEL-%s'):format(deliveryId)
+
+    -- Create order record (no payment processing)
+    local orderData = {
+        id = orderId,
+        job = job,
+        locationKey = locationKey,
+        customerId = 'DELIVERY',
+        customerName = ('Delivery: %s'):format(destination.label or 'Customer'),
+        customerSource = nil, -- No customer source for deliveries
+        items = items,
+        subtotal = 0,
+        tax = 0,
+        total = 0,
+        tip = 0,
+        status = 'pending',
+        createdAt = os.time(),
+        paymentMethod = 'delivery',
+        isDelivery = true,
+        deliveryId = deliveryId,
+        deliveryDestination = destination,
+        deliveryDriverSource = employeeSource,
+        deliveryDriverCitizenid = employee.PlayerData.citizenid,
+    }
+
+    -- Store in memory
+    activeOrders[orderId] = orderData
+
+    -- Store in database
+    MySQL.insert.await([[
+        INSERT INTO restaurant_orders (id, job, customer_citizenid, customer_name, items, total, status)
+        VALUES (?, ?, 'DELIVERY', ?, ?, 0, 'pending')
+    ]], {
+        orderId,
+        job,
+        orderData.customerName,
+        json.encode(items),
+    })
+
+    -- Notify restaurant staff
+    notifyStaff(job, 'new_order', orderData)
+
+    print(('[free-restaurants] New DELIVERY order #%s for delivery %s at %s'):format(
+        orderId, deliveryId, job
+    ))
+
+    return orderId, nil
+end
+
+--- Check if delivery order is ready for pickup
+---@param deliveryId string
+---@return boolean ready
+---@return string|nil orderId
+local function isDeliveryOrderReady(deliveryId)
+    local orderId = ('DEL-%s'):format(deliveryId)
+    local order = activeOrders[orderId]
+
+    if not order then return false, nil end
+
+    return order.status == 'ready', orderId
+end
+
+--- Get delivery order by delivery ID
+---@param deliveryId string
+---@return table|nil order
+local function getDeliveryOrder(deliveryId)
+    local orderId = ('DEL-%s'):format(deliveryId)
+    return activeOrders[orderId]
+end
+
+-- ============================================================================
 -- EXPORTS
 -- ============================================================================
 
@@ -800,5 +888,8 @@ exports('UpdateOrderStatus', updateOrderStatus)
 exports('CompleteOrder', completeOrder)
 exports('CancelOrder', cancelOrder)
 exports('GetActiveOrders', function() return activeOrders end)
+exports('CreateDeliveryOrder', createDeliveryOrder)
+exports('IsDeliveryOrderReady', isDeliveryOrderReady)
+exports('GetDeliveryOrder', getDeliveryOrder)
 
 print('[free-restaurants] server/customers.lua loaded')

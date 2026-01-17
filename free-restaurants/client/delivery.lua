@@ -398,6 +398,7 @@ local showDeliveryMenu
 local showDeliveryDetails
 local requestNewDelivery
 local acceptDelivery
+local waitForOrderReady
 local waitForPickup
 local attemptPickup
 local trackDeliveryProgress
@@ -575,21 +576,23 @@ end
 ---@param locationKey string
 ---@param locationData table
 acceptDelivery = function(delivery, locationKey, locationData)
-    local success = lib.callback.await('free-restaurants:server:acceptDelivery', false, delivery.id)
+    local success, kdsOrderId = lib.callback.await('free-restaurants:server:acceptDelivery', false, delivery.id)
 
     if success then
         activeDelivery = delivery
         activeDelivery.status = 'accepted'
         activeDelivery.locationData = locationData
+        activeDelivery.kdsOrderId = kdsOrderId
         isOnDelivery = true
 
         lib.notify({
             title = 'Delivery Accepted',
-            description = 'Pick up the items from the packaging station',
+            description = 'Order sent to kitchen - wait for it to be prepared',
             type = 'success',
+            duration = 5000,
         })
 
-        -- Ask about vehicle choice
+        -- Ask about vehicle choice while waiting
         local vehicleChoice = showVehicleChoiceDialog(locationData)
 
         if vehicleChoice == 'vehicle' then
@@ -603,12 +606,9 @@ acceptDelivery = function(delivery, locationKey, locationData)
             end
         end
 
-        -- Show pickup prompt
-        lib.showTextUI('[E] Pick up delivery items', { icon = 'box' })
-
-        -- Monitor for pickup
+        -- Start monitoring for order ready status
         CreateThread(function()
-            waitForPickup(locationKey, locationData)
+            waitForOrderReady(locationKey, locationData)
         end)
     else
         lib.notify({
@@ -619,10 +619,49 @@ acceptDelivery = function(delivery, locationKey, locationData)
     end
 end
 
---- Wait for player to pick up items
+--- Wait for order to be ready for pickup
+---@param locationKey string
+---@param locationData table
+waitForOrderReady = function(locationKey, locationData)
+    local lastStatus = 'pending'
+    lib.showTextUI('Waiting for kitchen to prepare order...', { icon = 'clock' })
+
+    while activeDelivery and activeDelivery.status == 'accepted' do
+        Wait(3000) -- Check every 3 seconds
+
+        local ready, status = lib.callback.await('free-restaurants:server:isDeliveryReady', false, activeDelivery.id)
+
+        -- Update UI based on status
+        if status ~= lastStatus then
+            lastStatus = status
+            if status == 'cooking' then
+                lib.showTextUI('Kitchen is preparing your order...', { icon = 'fire' })
+            elseif status == 'ready' then
+                lib.hideTextUI()
+                lib.notify({
+                    title = 'Order Ready!',
+                    description = 'Pick up items from the packaging station',
+                    type = 'success',
+                    duration = 5000,
+                })
+                PlaySoundFrontend(-1, 'PICK_UP', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
+
+                -- Now wait for pickup
+                waitForPickup(locationKey, locationData)
+                return
+            end
+        end
+    end
+
+    lib.hideTextUI()
+end
+
+--- Wait for player to pick up items from pickup area
 ---@param locationKey string
 ---@param locationData table
 waitForPickup = function(locationKey, locationData)
+    lib.showTextUI('[E] Pick up delivery items from packaging station', { icon = 'box' })
+
     while activeDelivery and activeDelivery.status == 'accepted' do
         Wait(100)
 
@@ -634,13 +673,13 @@ waitForPickup = function(locationKey, locationData)
     lib.hideTextUI()
 end
 
---- Attempt to pick up delivery items
+--- Attempt to pick up delivery items from pickup stash
 attemptPickup = function()
     if not activeDelivery then return end
 
     lib.showTextUI('Picking up items...', { icon = 'spinner' })
 
-    local success = lib.callback.await('free-restaurants:server:pickupDelivery', false, activeDelivery.id)
+    local success, error = lib.callback.await('free-restaurants:server:pickupDelivery', false, activeDelivery.id)
 
     lib.hideTextUI()
 
@@ -673,7 +712,7 @@ attemptPickup = function()
     else
         lib.notify({
             title = 'Pickup Failed',
-            description = 'Make sure you have all the required items',
+            description = error or 'Items not ready for pickup',
             type = 'error',
         })
     end

@@ -324,58 +324,134 @@ end
 -- DELIVERY MANAGEMENT
 -- ============================================================================
 
---- Accept a delivery
+--- Accept a delivery and create KDS order
 ---@param deliveryId string
 ---@param employeeSource number
 ---@return boolean success
+---@return string|nil kdsOrderId
 local function acceptDelivery(deliveryId, employeeSource)
     local delivery = activeDeliveries[deliveryId]
-    if not delivery then return false end
+    if not delivery then return false, nil end
 
-    if delivery.status ~= 'pending' then return false end
+    if delivery.status ~= 'pending' then return false, nil end
+
+    local employee = exports.qbx_core:GetPlayer(employeeSource)
+    if not employee then return false, nil end
+
+    -- Create KDS order for kitchen staff to cook
+    local kdsOrderId, err = exports['free-restaurants']:CreateDeliveryOrder(
+        delivery.job,
+        delivery.sourceLocation,
+        deliveryId,
+        delivery.items,
+        delivery.destination,
+        employeeSource
+    )
+
+    if not kdsOrderId then
+        print(('[free-restaurants] Failed to create KDS order for delivery %s: %s'):format(deliveryId, err or 'unknown'))
+        return false, nil
+    end
 
     delivery.status = 'accepted'
     delivery.acceptedAt = os.time()
     delivery.employeeSource = employeeSource
+    delivery.employeeCitizenid = employee.PlayerData.citizenid
+    delivery.kdsOrderId = kdsOrderId
 
-    local employee = exports.qbx_core:GetPlayer(employeeSource)
-    if employee then
-        delivery.employeeCitizenid = employee.PlayerData.citizenid
-    end
+    print(('[free-restaurants] Delivery %s accepted, KDS order %s created'):format(deliveryId, kdsOrderId))
 
-    return true
+    return true, kdsOrderId
 end
 
---- Mark items as picked up
+--- Check if delivery order is ready for pickup
+---@param deliveryId string
+---@return boolean ready
+---@return string|nil status
+local function isDeliveryReady(deliveryId)
+    local delivery = activeDeliveries[deliveryId]
+    if not delivery then return false, 'not_found' end
+
+    -- Check KDS order status
+    local kdsOrder = exports['free-restaurants']:GetDeliveryOrder(deliveryId)
+    if not kdsOrder then return false, 'no_kds_order' end
+
+    if kdsOrder.status == 'ready' then
+        return true, 'ready'
+    elseif kdsOrder.status == 'pending' then
+        return false, 'pending'
+    elseif kdsOrder.status == 'in_progress' then
+        return false, 'cooking'
+    else
+        return false, kdsOrder.status
+    end
+end
+
+--- Mark items as picked up from pickup stash
 ---@param deliveryId string
 ---@param employeeSource number
 ---@return boolean success
+---@return string|nil error
 local function pickupDeliveryItems(deliveryId, employeeSource)
     local delivery = activeDeliveries[deliveryId]
-    if not delivery then return false end
+    if not delivery then return false, 'Delivery not found' end
 
-    if delivery.status ~= 'accepted' then return false end
-    if delivery.employeeSource ~= employeeSource then return false end
+    if delivery.status ~= 'accepted' then return false, 'Delivery not in accepted status' end
+    if delivery.employeeSource ~= employeeSource then return false, 'Not your delivery' end
 
-    -- Check employee has all items
-    for _, item in ipairs(delivery.items) do
-        local itemName = item.resultItem or item.id
-        local count = exports.ox_inventory:Search(employeeSource, 'count', itemName)
-        if count < item.amount then
-            return false
+    -- Check if KDS order is ready
+    local ready, status = isDeliveryReady(deliveryId)
+    if not ready then
+        if status == 'pending' then
+            return false, 'Order is waiting to be prepared'
+        elseif status == 'cooking' then
+            return false, 'Order is being prepared'
+        else
+            return false, 'Order not ready for pickup'
         end
     end
 
-    -- Remove items from inventory
+    -- Get stash ID for this location
+    local stashId = ('restaurant_pickup_%s'):format(delivery.sourceLocation)
+
+    -- Check stash has all items
     for _, item in ipairs(delivery.items) do
         local itemName = item.resultItem or item.id
-        exports.ox_inventory:RemoveItem(employeeSource, itemName, item.amount)
+        local stashItems = exports.ox_inventory:GetInventoryItems(stashId)
+        local found = 0
+
+        if stashItems then
+            for _, stashItem in pairs(stashItems) do
+                if stashItem.name == itemName then
+                    found = found + stashItem.count
+                end
+            end
+        end
+
+        if found < item.amount then
+            return false, ('Missing items in pickup area: %s'):format(item.label)
+        end
+    end
+
+    -- Move items from stash to delivery driver
+    for _, item in ipairs(delivery.items) do
+        local itemName = item.resultItem or item.id
+        -- Remove from stash
+        exports.ox_inventory:RemoveItem(stashId, itemName, item.amount)
+        -- Add to driver
+        exports.ox_inventory:AddItem(employeeSource, itemName, item.amount)
     end
 
     delivery.status = 'picked_up'
     delivery.pickedUpAt = os.time()
 
-    return true
+    -- Complete the KDS order (remove from display)
+    local kdsOrderId = delivery.kdsOrderId
+    if kdsOrderId then
+        exports['free-restaurants']:CompleteOrder(kdsOrderId, employeeSource)
+    end
+
+    return true, nil
 end
 
 --- Complete a delivery
@@ -592,12 +668,19 @@ end)
 
 --- Accept delivery
 lib.callback.register('free-restaurants:server:acceptDelivery', function(source, deliveryId)
-    return acceptDelivery(deliveryId, source)
+    local success, kdsOrderId = acceptDelivery(deliveryId, source)
+    return success, kdsOrderId
+end)
+
+--- Check if delivery is ready for pickup
+lib.callback.register('free-restaurants:server:isDeliveryReady', function(source, deliveryId)
+    return isDeliveryReady(deliveryId)
 end)
 
 --- Pickup delivery items
 lib.callback.register('free-restaurants:server:pickupDelivery', function(source, deliveryId)
-    return pickupDeliveryItems(deliveryId, source)
+    local success, error = pickupDeliveryItems(deliveryId, source)
+    return success, error
 end)
 
 --- Complete delivery
