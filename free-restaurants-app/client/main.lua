@@ -436,6 +436,230 @@ RegisterNUICallback('closeApp', function(data, cb)
 end)
 
 -- ============================================================================
+-- MANAGEMENT CALLBACKS
+-- ============================================================================
+
+-- Get employees list
+RegisterNUICallback('getEmployees', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({ error = 'No access' })
+        return
+    end
+
+    local employees = lib.callback.await('free-restaurants:server:getEmployees', false, access.job)
+    cb(employees or {})
+end)
+
+-- Get job grades
+RegisterNUICallback('getJobGrades', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.isEmployee then
+        cb({})
+        return
+    end
+
+    -- Get grades from config
+    local jobConfig = exports['free-restaurants']:GetRestaurantJobs()
+    local job = jobConfig and jobConfig[access.job]
+    local grades = {}
+
+    if job and job.grades then
+        for level, gradeData in pairs(job.grades) do
+            table.insert(grades, {
+                level = level,
+                name = gradeData.name or gradeData.label or ('Grade ' .. level),
+                payment = gradeData.payment,
+            })
+        end
+        table.sort(grades, function(a, b) return a.level < b.level end)
+    else
+        -- Default grades if not configured
+        grades = {
+            { level = 0, name = 'Trainee' },
+            { level = 1, name = 'Worker' },
+            { level = 2, name = 'Chef' },
+            { level = 3, name = 'Shift Manager' },
+            { level = 4, name = 'Assistant Manager' },
+            { level = 5, name = 'Owner' },
+        }
+    end
+
+    cb(grades)
+end)
+
+-- Get nearby players for hiring
+RegisterNUICallback('getNearbyPlayers', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({})
+        return
+    end
+
+    local players = lib.callback.await('free-restaurants:server:getNearbyPlayers', false, 10.0)
+    cb(players or {})
+end)
+
+-- Hire employee
+RegisterNUICallback('hireEmployee', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({ success = false, error = 'No permission' })
+        return
+    end
+
+    local result = lib.callback.await('free-restaurants:server:hireEmployee', false, data.playerId, access.job, data.grade)
+    cb({ success = result })
+end)
+
+-- Fire employee
+RegisterNUICallback('fireEmployee', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({ success = false, error = 'No permission' })
+        return
+    end
+
+    local result = lib.callback.await('free-restaurants:server:fireEmployee', false, data.citizenid, access.job)
+    cb({ success = result })
+end)
+
+-- Set employee grade (promote/demote)
+RegisterNUICallback('setEmployeeGrade', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({ success = false, error = 'No permission' })
+        return
+    end
+
+    local result = lib.callback.await('free-restaurants:server:setEmployeeGrade', false, data.citizenid, access.job, data.grade)
+    cb({ success = result })
+end)
+
+-- Get finances
+RegisterNUICallback('getFinances', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({ error = 'No access' })
+        return
+    end
+
+    local finances = lib.callback.await('free-restaurants:server:getFinances', false, access.job)
+    cb(finances or {})
+end)
+
+-- Get transactions
+RegisterNUICallback('getTransactions', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({})
+        return
+    end
+
+    local transactions = lib.callback.await('free-restaurants:server:getTransactions', false, access.job)
+    cb(transactions or {})
+end)
+
+-- Withdraw funds
+RegisterNUICallback('withdrawFunds', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({ success = false, error = 'No permission' })
+        return
+    end
+
+    local result = lib.callback.await('free-restaurants:server:withdrawFunds', false, access.job, data.amount)
+    cb({ success = result })
+end)
+
+-- Deposit funds
+RegisterNUICallback('depositFunds', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.isEmployee then
+        cb({ success = false, error = 'No permission' })
+        return
+    end
+
+    local result = lib.callback.await('free-restaurants:server:depositFunds', false, access.job, data.amount)
+    cb({ success = result })
+end)
+
+-- Get pricing
+RegisterNUICallback('getPricing', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({})
+        return
+    end
+
+    local pricing = lib.callback.await('free-restaurants:server:getPricing', false, access.job)
+
+    -- Transform pricing data for UI
+    local items = {}
+    if pricing then
+        for itemId, priceData in pairs(pricing) do
+            table.insert(items, {
+                itemId = itemId,
+                name = itemId, -- Will be replaced with proper name from config
+                category = 'Menu',
+                basePrice = priceData.basePrice or priceData.price,
+                currentPrice = priceData.price,
+            })
+        end
+    end
+
+    cb(items)
+end)
+
+-- Set price
+RegisterNUICallback('setPrice', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({ success = false, error = 'No permission' })
+        return
+    end
+
+    local result = lib.callback.await('free-restaurants:server:setPrice', false, access.job, data.itemId, data.price)
+    cb({ success = result })
+end)
+
+-- Get stock items
+RegisterNUICallback('getStockItems', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({})
+        return
+    end
+
+    local items = lib.callback.await('free-restaurants:server:getStockItems', false, access.job)
+    cb(items or {})
+end)
+
+-- Get active stock orders
+RegisterNUICallback('getActiveStockOrders', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.isEmployee then
+        cb({})
+        return
+    end
+
+    local orders = lib.callback.await('free-restaurants:server:getActiveStockOrders', false, access.job)
+    cb(orders or {})
+end)
+
+-- Order stock
+RegisterNUICallback('orderStock', function(data, cb)
+    local access = getEmployeeAccess()
+    if not access.canManage then
+        cb({ success = false, error = 'No permission' })
+        return
+    end
+
+    local success, orderId = lib.callback.await('free-restaurants:server:orderStock', false, access.job, data.itemName, data.quantity)
+    cb({ success = success, orderId = orderId })
+end)
+
+-- ============================================================================
 -- EVENTS
 -- ============================================================================
 
