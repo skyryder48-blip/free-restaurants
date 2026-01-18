@@ -1,18 +1,75 @@
 --[[
     free-restaurants Server Management System
-    
+
     Handles:
     - Employee management (hire, fire, promote, demote)
     - Business finances (withdraw, deposit, transactions)
     - Stock ordering
     - Menu pricing adjustments
     - Wage management
-    
+
     DEPENDENCIES:
     - server/main.lua
     - qbx_core
     - oxmysql
 ]]
+
+-- ============================================================================
+-- HELPER FUNCTIONS
+-- ============================================================================
+
+--- Get effective grade permissions with fallback to highest available grade
+---@param job string
+---@param gradeLevel number
+---@return table|nil permissions
+---@return number effectiveGrade
+local function getEffectivePermissions(job, gradeLevel)
+    local jobConfig = Config.Jobs[job]
+    if not jobConfig then return nil, gradeLevel end
+
+    -- Try the exact grade first
+    local gradeData = jobConfig.grades[gradeLevel]
+    if gradeData and gradeData.permissions then
+        return gradeData.permissions, gradeLevel
+    end
+
+    -- Fallback to highest available grade
+    local maxGrade = -1
+    local maxGradeData = nil
+    for g, data in pairs(jobConfig.grades) do
+        if type(g) == 'number' and g > maxGrade then
+            maxGrade = g
+            maxGradeData = data
+        end
+    end
+
+    if maxGradeData and maxGradeData.permissions then
+        print(('[free-restaurants] Using fallback grade %d instead of %d for %s'):format(maxGrade, gradeLevel, job))
+        return maxGradeData.permissions, maxGrade
+    end
+
+    return nil, gradeLevel
+end
+
+--- Check if player has permission
+---@param source number
+---@param job string
+---@param permission string
+---@return boolean
+local function hasServerPermission(source, job, permission)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false end
+
+    if player.PlayerData.job.name ~= job then return false end
+
+    local gradeLevel = player.PlayerData.job.grade.level
+    local perms = getEffectivePermissions(job, gradeLevel)
+
+    if not perms then return false end
+    if perms.all == true then return true end
+
+    return perms[permission] == true
+end
 
 -- ============================================================================
 -- EMPLOYEE MANAGEMENT
@@ -179,23 +236,15 @@ end)
 lib.callback.register('free-restaurants:server:withdrawFunds', function(source, job, amount)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false end
-    
-    -- Verify permission
-    if player.PlayerData.job.name ~= job then return false end
-    
-    local grade = player.PlayerData.job.grade.level
-    local jobConfig = Config.Jobs[job]
-    if not jobConfig then return false end
-    
-    local gradePerms = jobConfig.grades[grade] and jobConfig.grades[grade].permissions
-    if not gradePerms or not (gradePerms.canAccessFinances or gradePerms.all) then
+
+    if not hasServerPermission(source, job, 'canAccessFinances') then
         return false
     end
-    
+
     -- Check balance
     local balance = exports['free-restaurants']:GetBusinessBalance(job)
-    if amount > balance then return false end
-    
+    if not balance or amount > balance then return false end
+
     -- Process withdrawal
     local success = exports['free-restaurants']:UpdateBusinessBalance(
         job,
@@ -207,11 +256,11 @@ lib.callback.register('free-restaurants:server:withdrawFunds', function(source, 
         ),
         player.PlayerData.citizenid
     )
-    
+
     if success then
         player.Functions.AddMoney('cash', amount, 'restaurant-withdrawal')
     end
-    
+
     return success
 end)
 
@@ -287,67 +336,43 @@ lib.callback.register('free-restaurants:server:getEmployees', function(source, j
 end)
 
 lib.callback.register('free-restaurants:server:hireEmployee', function(source, targetId, job, grade)
-    local player = exports.qbx_core:GetPlayer(source)
-    if not player then return false end
-    
-    -- Verify permission
-    if player.PlayerData.job.name ~= job then return false end
-    
-    local gradeLevel = player.PlayerData.job.grade.level
-    local jobConfig = Config.Jobs[job]
-    if not jobConfig then return false end
-    
-    local gradePerms = jobConfig.grades[gradeLevel] and jobConfig.grades[gradeLevel].permissions
-    if not gradePerms or not (gradePerms.canHire or gradePerms.all) then
+    if not hasServerPermission(source, job, 'canHire') then
         return false
     end
-    
+
     return hireEmployee(targetId, job, grade)
 end)
 
 lib.callback.register('free-restaurants:server:fireEmployee', function(source, citizenid, job)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false end
-    
-    -- Verify permission
-    if player.PlayerData.job.name ~= job then return false end
-    
-    local gradeLevel = player.PlayerData.job.grade.level
-    local jobConfig = Config.Jobs[job]
-    if not jobConfig then return false end
-    
-    local gradePerms = jobConfig.grades[gradeLevel] and jobConfig.grades[gradeLevel].permissions
-    if not gradePerms or not (gradePerms.canFire or gradePerms.all) then
+
+    if not hasServerPermission(source, job, 'canFire') then
         return false
     end
-    
+
     -- Can't fire yourself
     if player.PlayerData.citizenid == citizenid then return false end
-    
+
     return fireEmployee(citizenid, job)
 end)
 
 lib.callback.register('free-restaurants:server:setEmployeeGrade', function(source, citizenid, job, grade)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false end
-    
-    -- Verify permission
-    if player.PlayerData.job.name ~= job then return false end
-    
+
     local gradeLevel = player.PlayerData.job.grade.level
-    local jobConfig = Config.Jobs[job]
-    if not jobConfig then return false end
-    
-    local gradePerms = jobConfig.grades[gradeLevel] and jobConfig.grades[gradeLevel].permissions
-    if not gradePerms or not (gradePerms.canHire or gradePerms.all) then
+    local perms, effectiveGrade = getEffectivePermissions(job, gradeLevel)
+
+    if not perms or not (perms.canHire or perms.all) then
         return false
     end
-    
+
     -- Can't set higher grade than self (unless owner)
-    if grade >= gradeLevel and not gradePerms.all then
+    if grade >= effectiveGrade and not perms.all then
         return false
     end
-    
+
     return setEmployeeGrade(citizenid, job, grade)
 end)
 
@@ -381,59 +406,82 @@ end)
 lib.callback.register('free-restaurants:server:orderStock', function(source, job, itemName, quantity)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false end
-    
-    -- Verify permission
-    if player.PlayerData.job.name ~= job then return false end
-    
-    local gradeLevel = player.PlayerData.job.grade.level
-    local jobConfig = Config.Jobs[job]
-    if not jobConfig then return false end
-    
-    local gradePerms = jobConfig.grades[gradeLevel] and jobConfig.grades[gradeLevel].permissions
-    if not gradePerms or not (gradePerms.canOrderStock or gradePerms.all) then
+
+    if not hasServerPermission(source, job, 'canOrderStock') then
         return false
     end
-    
-    -- Find item and price
-    local stockItems = Config.Stock and Config.Stock[job] or {}
+
+    -- Find item and price from default list or config
+    local defaultStockItems = {
+        { name = 'bun', label = 'Burger Buns', price = 5 },
+        { name = 'patty_raw', label = 'Raw Patties', price = 10 },
+        { name = 'lettuce', label = 'Lettuce', price = 3 },
+        { name = 'tomato', label = 'Tomatoes', price = 3 },
+        { name = 'cheese', label = 'Cheese Slices', price = 4 },
+        { name = 'fries_raw', label = 'Frozen Fries', price = 8 },
+        { name = 'soda_syrup', label = 'Soda Syrup', price = 15 },
+        { name = 'napkins', label = 'Napkins', price = 2 },
+    }
+
+    local stockItems = Config.Stock and Config.Stock[job] or defaultStockItems
     local itemData = nil
-    
+
     for _, item in ipairs(stockItems) do
         if item.name == itemName then
             itemData = item
             break
         end
     end
-    
-    -- Default price if not found
-    local price = itemData and itemData.price or 10
-    local totalCost = price * quantity
-    
-    -- Check business balance
-    local balance = exports['free-restaurants']:GetBusinessBalance(job)
-    if totalCost > balance then
+
+    if not itemData then
+        print(('[free-restaurants] Stock order failed: item %s not found'):format(itemName))
         return false
     end
-    
+
+    local totalCost = itemData.price * quantity
+
+    -- Check business balance
+    local balance = exports['free-restaurants']:GetBusinessBalance(job)
+    if not balance or totalCost > balance then
+        print(('[free-restaurants] Stock order failed: insufficient balance (need %d, have %s)'):format(totalCost, tostring(balance)))
+        return false
+    end
+
     -- Deduct from business
     local success = exports['free-restaurants']:UpdateBusinessBalance(
         job,
         -totalCost,
         'stock_order',
-        ('Ordered %dx %s'):format(quantity, itemName),
+        ('Ordered %dx %s'):format(quantity, itemData.label),
         player.PlayerData.citizenid
     )
-    
+
     if success then
-        -- Add items to business storage
-        local stashId = ('restaurant_business_%s_main'):format(job)
+        -- Add items to business storage - use location-based stash
+        -- Find the first enabled location for this job
+        for restaurantType, locations in pairs(Config.Locations) do
+            if type(locations) == 'table' then
+                for locationId, locationData in pairs(locations) do
+                    if type(locationData) == 'table' and locationData.enabled and locationData.job == job then
+                        local stashId = ('restaurant_%s_%s_storage'):format(restaurantType, locationId)
+                        exports.ox_inventory:AddItem(stashId, itemName, quantity)
+                        print(('[free-restaurants] %s ordered %dx %s ($%d) for %s -> %s'):format(
+                            player.PlayerData.citizenid, quantity, itemData.label, totalCost, job, stashId
+                        ))
+                        return true
+                    end
+                end
+            end
+        end
+
+        -- Fallback stash if no location found
+        local stashId = ('restaurant_business_%s'):format(job)
         exports.ox_inventory:AddItem(stashId, itemName, quantity)
-        
-        print(('[free-restaurants] %s ordered %dx %s for %s'):format(
-            player.PlayerData.citizenid, quantity, itemName, job
+        print(('[free-restaurants] %s ordered %dx %s ($%d) for %s'):format(
+            player.PlayerData.citizenid, quantity, itemData.label, totalCost, job
         ))
     end
-    
+
     return success
 end)
 
@@ -477,40 +525,29 @@ end)
 
 --- Set item price
 lib.callback.register('free-restaurants:server:setPrice', function(source, job, itemId, price)
-    local player = exports.qbx_core:GetPlayer(source)
-    if not player then return false end
-    
-    -- Verify permission
-    if player.PlayerData.job.name ~= job then return false end
-    
-    local gradeLevel = player.PlayerData.job.grade.level
-    local jobConfig = Config.Jobs[job]
-    if not jobConfig then return false end
-    
-    local gradePerms = jobConfig.grades[gradeLevel] and jobConfig.grades[gradeLevel].permissions
-    if not gradePerms or not (gradePerms.canEditMenu or gradePerms.all) then
+    if not hasServerPermission(source, job, 'canEditMenu') then
         return false
     end
-    
+
     -- Validate price range
     local recipe = Config.Recipes[itemId]
     if recipe then
         local basePrice = recipe.price or 0
         local minPrice = math.floor(basePrice * (Config.Economy and Config.Economy.Pricing and Config.Economy.Pricing.priceFloor or 0.5))
         local maxPrice = math.floor(basePrice * (Config.Economy and Config.Economy.Pricing and Config.Economy.Pricing.priceCeiling or 2.0))
-        
+
         if price < minPrice or price > maxPrice then
             return false
         end
     end
-    
+
     -- Update database
     MySQL.query.await([[
-        INSERT INTO restaurant_pricing (job, item_id, price) 
+        INSERT INTO restaurant_pricing (job, item_id, price)
         VALUES (?, ?, ?)
         ON DUPLICATE KEY UPDATE price = ?
     ]], { job, itemId, price, price })
-    
+
     return true
 end)
 
@@ -520,29 +557,18 @@ end)
 
 --- Set wage for a grade
 lib.callback.register('free-restaurants:server:setWage', function(source, job, grade, wage)
-    local player = exports.qbx_core:GetPlayer(source)
-    if not player then return false end
-    
-    -- Verify permission
-    if player.PlayerData.job.name ~= job then return false end
-    
-    local gradeLevel = player.PlayerData.job.grade.level
-    local jobConfig = Config.Jobs[job]
-    if not jobConfig then return false end
-    
-    local gradePerms = jobConfig.grades[gradeLevel] and jobConfig.grades[gradeLevel].permissions
-    if not gradePerms or not (gradePerms.canSetWages or gradePerms.all) then
+    if not hasServerPermission(source, job, 'canSetWages') then
         return false
     end
-    
+
     -- Update config (runtime only - would need separate persistence for permanent changes)
-    if Config.Jobs[job].grades[grade] then
+    if Config.Jobs[job] and Config.Jobs[job].grades[grade] then
         Config.Jobs[job].grades[grade].payment = wage
+        print(('[free-restaurants] Wage updated for %s grade %d to $%d'):format(job, grade, wage))
+        return true
     end
-    
-    -- Could also save to database for persistence across restarts
-    
-    return true
+
+    return false
 end)
 
 -- ============================================================================
