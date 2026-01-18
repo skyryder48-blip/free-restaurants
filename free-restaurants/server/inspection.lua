@@ -20,13 +20,13 @@
 local InspectionConfig = {
     -- How often to check for inspections (minutes)
     checkInterval = 30,
-    
+
     -- Base chance of inspection per check when restaurant is staffed (0-1)
     baseChance = 0.05, -- 5% per check
-    
+
     -- Minimum time between inspections (hours)
     minTimeBetween = 24,
-    
+
     -- Score thresholds for grades
     grades = {
         A = 90,  -- 90-100
@@ -35,7 +35,7 @@ local InspectionConfig = {
         D = 60,  -- 60-69
         F = 0,   -- 0-59
     },
-    
+
     -- Violation categories and point deductions
     violations = {
         -- Critical violations (major point loss)
@@ -60,7 +60,7 @@ local InspectionConfig = {
             { id = 'equipment', label = 'Equipment maintenance needed', points = 4 },
         },
     },
-    
+
     -- Bonuses for good practices
     bonuses = {
         { id = 'clean_stations', label = 'Exceptionally clean stations', points = 5 },
@@ -69,6 +69,54 @@ local InspectionConfig = {
         { id = 'quick_response', label = 'Quick response to issues', points = 2 },
     },
 }
+
+-- ============================================================================
+-- FORWARD DECLARATIONS
+-- ============================================================================
+
+local tableContains
+local notifyStaff
+
+-- ============================================================================
+-- HELPER FUNCTIONS (defined early to avoid forward reference issues)
+-- ============================================================================
+
+--- Check if table contains value
+---@param tbl table
+---@param value any
+---@return boolean
+tableContains = function(tbl, value)
+    for _, v in ipairs(tbl) do
+        if v == value then return true end
+    end
+    return false
+end
+
+--- Notify staff of inspection result
+---@param job string
+---@param result table
+notifyStaff = function(job, result)
+    local players = exports.qbx_core:GetQBPlayers()
+
+    for _, player in pairs(players) do
+        if player.PlayerData.job.name == job then
+            TriggerClientEvent('free-restaurants:client:inspectionResult', player.PlayerData.source, result)
+
+            local notifyType = 'inform'
+            if result.grade == 'A' then notifyType = 'success'
+            elseif result.grade == 'F' then notifyType = 'error'
+            elseif result.grade == 'D' then notifyType = 'warning'
+            end
+
+            TriggerClientEvent('ox_lib:notify', player.PlayerData.source, {
+                title = 'Health Inspection',
+                description = ('Grade: %s (%d/100)'):format(result.grade, result.score),
+                type = notifyType,
+                duration = 10000,
+            })
+        end
+    end
+end
 
 -- ============================================================================
 -- DATABASE
@@ -189,11 +237,11 @@ end
 ---@param cleanerCitizenid string
 local function markCleaned(job, cleanerCitizenid)
     MySQL.update.await([[
-        UPDATE restaurant_cleanliness 
+        UPDATE restaurant_cleanliness
         SET last_cleaned = NOW(), cleanliness_score = LEAST(100, cleanliness_score + 10)
         WHERE job = ?
     ]], { job })
-    
+
     -- Award XP to cleaner
     local players = exports.qbx_core:GetQBPlayers()
     for _, player in pairs(players) do
@@ -202,14 +250,6 @@ local function markCleaned(job, cleanerCitizenid)
             break
         end
     end
-end
-
--- Helper
-local function tableContains(tbl, value)
-    for _, v in ipairs(tbl) do
-        if v == value then return true end
-    end
-    return false
 end
 
 -- ============================================================================
@@ -343,39 +383,13 @@ local function conductInspection(job, locationKey)
         violations = violations,
         bonuses = bonuses,
         notes = notes,
-        inspectedAt = os.time(),
+        inspectedAt = GetGameTimer(),
     }
-    
+
     -- Notify all staff
     notifyStaff(job, result)
-    
-    return result
-end
 
---- Notify staff of inspection result
----@param job string
----@param result table
-local function notifyStaff(job, result)
-    local players = exports.qbx_core:GetQBPlayers()
-    
-    for _, player in pairs(players) do
-        if player.PlayerData.job.name == job then
-            TriggerClientEvent('free-restaurants:client:inspectionResult', player.PlayerData.source, result)
-            
-            local notifyType = 'inform'
-            if result.grade == 'A' then notifyType = 'success'
-            elseif result.grade == 'F' then notifyType = 'error'
-            elseif result.grade == 'D' then notifyType = 'warning'
-            end
-            
-            TriggerClientEvent('ox_lib:notify', player.PlayerData.source, {
-                title = 'Health Inspection',
-                description = ('Grade: %s (%d/100)'):format(result.grade, result.score),
-                type = notifyType,
-                duration = 10000,
-            })
-        end
-    end
+    return result
 end
 
 --- Get last inspection for a job
@@ -396,23 +410,29 @@ end
 local function getInspectionStatus(job)
     local last = getLastInspection(job)
     local cleanliness = getCleanlinessState(job)
-    
+
     local status = {
         currentScore = cleanliness.score,
         activeViolations = cleanliness.violations,
         lastCleaned = cleanliness.lastCleaned,
     }
-    
+
     if last then
         status.lastInspection = last.inspected_at
         status.lastGrade = last.grade
         status.lastScore = last.score
-        
-        -- Estimate next inspection
-        local lastTime = os.time() -- Approximate from DB timestamp
-        status.nextInspection = lastTime + (InspectionConfig.minTimeBetween * 3600)
+
+        -- Get hours since last inspection from database
+        local hoursSince = MySQL.scalar.await([[
+            SELECT TIMESTAMPDIFF(HOUR, inspected_at, NOW()) FROM restaurant_inspections
+            WHERE job = ? ORDER BY inspected_at DESC LIMIT 1
+        ]], { job }) or 0
+
+        -- Estimate next inspection (hours remaining)
+        local hoursUntilNext = math.max(0, InspectionConfig.minTimeBetween - hoursSince)
+        status.hoursUntilNextInspection = hoursUntilNext
     end
-    
+
     return status
 end
 
@@ -425,18 +445,25 @@ end
 ---@return boolean
 local function shouldInspect(job)
     local last = getLastInspection(job)
-    
+
     if last then
-        -- Check minimum time between inspections
-        local lastTime = os.time() -- Would need proper timestamp parsing
-        local minInterval = InspectionConfig.minTimeBetween * 3600
-        
-        -- For now, just use random chance
+        -- Check minimum time between inspections using database
+        local hoursSince = MySQL.scalar.await([[
+            SELECT TIMESTAMPDIFF(HOUR, inspected_at, NOW()) FROM restaurant_inspections
+            WHERE job = ? ORDER BY inspected_at DESC LIMIT 1
+        ]], { job }) or 999
+
+        -- Don't inspect if minimum time hasn't passed
+        if hoursSince < InspectionConfig.minTimeBetween then
+            return false
+        end
+
+        -- Random chance after minimum time has passed
         if math.random() > InspectionConfig.baseChance then
             return false
         end
     end
-    
+
     return true
 end
 
