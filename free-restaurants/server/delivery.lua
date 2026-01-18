@@ -997,6 +997,21 @@ exports('AcceptDelivery', acceptDelivery)
 exports('CompleteDelivery', completeDelivery)
 exports('CancelDelivery', cancelDelivery)
 exports('GetActiveDeliveries', function() return activeDeliveries end)
+exports('GetAvailableDeliveries', function(job)
+    local available = {}
+    for id, delivery in pairs(activeDeliveries) do
+        if delivery.job == job and (delivery.status == 'pending' or delivery.status == 'ready') then
+            table.insert(available, {
+                deliveryId = id,
+                destination = delivery.destination,
+                reward = delivery.totalPayout,
+                distance = delivery.distance,
+                status = delivery.status,
+            })
+        end
+    end
+    return available
+end)
 exports('CreateCateringOrder', createCateringOrder)
 exports('NotifyNewDelivery', notifyNewDelivery)
 

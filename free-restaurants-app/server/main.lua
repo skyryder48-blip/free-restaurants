@@ -229,7 +229,7 @@ lib.callback.register('free-restaurants-app:getRestaurantMenu', function(source,
     if not job then return {} end
 
     -- Get menu with custom pricing from free-restaurants
-    local pricing = lib.callback.await('free-restaurants:server:getPricing', source, job)
+    local pricing = exports['free-restaurants']:GetPricing(job) or {}
     local menu = {}
     local categories = {}
     local seenCategories = {}
@@ -541,11 +541,30 @@ lib.callback.register('free-restaurants-app:setRestaurantStatus', function(sourc
         return { success = false, error = 'Insufficient permissions' }
     end
 
+    -- Handle both 'isOpen' (from UI) and 'open' (legacy) field names
+    local isOpen = data.isOpen
+    if isOpen == nil then
+        isOpen = data.open
+    end
+    if isOpen == nil then
+        isOpen = false
+    end
+
+    -- When opening, default to accepting pickup orders; when closing, disable all
+    local acceptsPickup = data.acceptsPickup
+    local acceptsDelivery = data.acceptsDelivery
+    if acceptsPickup == nil then
+        acceptsPickup = isOpen -- Default: accept pickup when open
+    end
+    if acceptsDelivery == nil then
+        acceptsDelivery = isOpen -- Default: accept delivery when open
+    end
+
     -- Update status
     restaurantStatus[job] = {
-        open = data.open or false,
-        acceptsPickup = data.acceptsPickup or false,
-        acceptsDelivery = data.acceptsDelivery or false,
+        open = isOpen,
+        acceptsPickup = acceptsPickup,
+        acceptsDelivery = acceptsDelivery,
     }
 
     -- Save to database
@@ -559,9 +578,9 @@ lib.callback.register('free-restaurants-app:setRestaurantStatus', function(sourc
             updated_by = VALUES(updated_by)
     ]], {
         job,
-        data.open,
-        data.acceptsPickup,
-        data.acceptsDelivery,
+        isOpen,
+        acceptsPickup,
+        acceptsDelivery,
         player.PlayerData.citizenid,
     })
 
@@ -569,10 +588,10 @@ lib.callback.register('free-restaurants-app:setRestaurantStatus', function(sourc
     notifyJobEmployees(job, 'free-restaurants-app:statusChanged', restaurantStatus[job])
 
     print(('[Food Hub] %s set restaurant status: open=%s, pickup=%s, delivery=%s'):format(
-        job, tostring(data.open), tostring(data.acceptsPickup), tostring(data.acceptsDelivery)
+        job, tostring(isOpen), tostring(acceptsPickup), tostring(acceptsDelivery)
     ))
 
-    return { success = true, status = restaurantStatus[job] }
+    return { success = true, status = restaurantStatus[job], isOpen = isOpen }
 end)
 
 --- Get pending app orders
