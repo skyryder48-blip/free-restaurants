@@ -1030,4 +1030,55 @@ exports('HireEmployee', hireEmployee)
 exports('FireEmployee', fireEmployee)
 exports('SetEmployeeGrade', setEmployeeGrade)
 
+--- Get pricing for a job (exported for cross-resource access)
+exports('GetPricing', function(job)
+    -- Get custom prices from database
+    local results = MySQL.query.await('SELECT * FROM restaurant_pricing WHERE job = ?', { job })
+
+    local pricing = {}
+
+    -- Check if Config.Recipes.Items exists
+    if not Config.Recipes or not Config.Recipes.Items then
+        return {}
+    end
+
+    -- Get the restaurant type from job config
+    local jobConfig = Config.Jobs[job]
+    local jobRestaurantType = jobConfig and jobConfig.type or nil
+
+    -- Start with base recipe prices - include all recipes for this job
+    for recipeId, recipe in pairs(Config.Recipes.Items) do
+        local shouldInclude = false
+
+        if not recipe.restaurantTypes or #recipe.restaurantTypes == 0 then
+            shouldInclude = true
+        elseif jobRestaurantType then
+            for _, rType in ipairs(recipe.restaurantTypes) do
+                if rType == jobRestaurantType then
+                    shouldInclude = true
+                    break
+                end
+            end
+        end
+
+        if shouldInclude and recipe.basePrice then
+            pricing[recipeId] = {
+                price = recipe.basePrice,
+                basePrice = recipe.basePrice,
+            }
+        end
+    end
+
+    -- Override with custom prices
+    if results then
+        for _, row in ipairs(results) do
+            if pricing[row.item_id] then
+                pricing[row.item_id].price = row.price
+            end
+        end
+    end
+
+    return pricing
+end)
+
 print('[free-restaurants] server/management.lua loaded')
