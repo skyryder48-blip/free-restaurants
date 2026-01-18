@@ -124,54 +124,66 @@ end
 local function generateOrderItems(job)
     local items = {}
     local total = 0
-    
-    -- Get menu items for this restaurant
+
+    -- Get the restaurant type for this job
+    local jobConfig = Config.Jobs and Config.Jobs[job]
+    local jobRestaurantType = jobConfig and jobConfig.type or nil
+
+    -- Get menu items for this restaurant - use Config.Recipes.Items
     local menuItems = {}
-    for recipeId, recipe in pairs(Config.Recipes) do
-        if recipe.canOrder ~= false then
+    local recipesTable = Config.Recipes and Config.Recipes.Items or {}
+
+    for recipeId, recipe in pairs(recipesTable) do
+        if recipe.canOrder ~= false and recipe.sellable ~= false then
             local matches = false
-            if recipe.restaurantType then
-                if type(recipe.restaurantType) == 'table' then
-                    for _, rt in ipairs(recipe.restaurantType) do
-                        if rt == job then matches = true break end
+
+            -- Check restaurantTypes (plural array)
+            if recipe.restaurantTypes then
+                for _, rType in ipairs(recipe.restaurantTypes) do
+                    if rType == jobRestaurantType or rType == 'all' then
+                        matches = true
+                        break
                     end
-                else
-                    matches = recipe.restaurantType == job
                 end
             else
+                -- No restriction, available to all
                 matches = true
             end
-            
-            if matches and recipe.price then
+
+            -- Use basePrice instead of price
+            if matches and recipe.basePrice then
                 table.insert(menuItems, {
                     id = recipeId,
                     label = recipe.label,
-                    price = recipe.price,
+                    price = recipe.basePrice,
                     result = recipe.result,
                 })
             end
         end
     end
-    
-    if #menuItems == 0 then return items, 0 end
-    
+
+    if #menuItems == 0 then
+        print(('[free-restaurants] NPC order generation: No menu items found for job %s (type: %s)'):format(job, tostring(jobRestaurantType)))
+        return items, 0
+    end
+
     -- Generate 1-4 items
     local itemCount = math.random(1, 4)
     local usedItems = {}
-    
+
     for i = 1, itemCount do
         local attempts = 0
         local item
-        
+
         repeat
             item = menuItems[math.random(#menuItems)]
             attempts = attempts + 1
         until not usedItems[item.id] or attempts > 10
-        
+
         if not usedItems[item.id] then
             usedItems[item.id] = true
             local amount = math.random(1, 2)
-            
+
             table.insert(items, {
                 id = item.id,
                 label = item.label,
@@ -179,11 +191,11 @@ local function generateOrderItems(job)
                 price = item.price,
                 resultItem = type(item.result) == 'table' and item.result.item or item.result,
             })
-            
+
             total = total + (item.price * amount)
         end
     end
-    
+
     return items, total
 end
 
@@ -277,7 +289,8 @@ local function createNPCOrder(job, locationKey)
     
     if not orderId then return nil end
     
-    -- Track NPC order
+    -- Track NPC order - use GetGameTimer() for FiveM compatibility
+    local currentTime = GetGameTimer()
     npcOrders[orderId] = {
         orderId = orderId,
         npc = npcData,
@@ -286,8 +299,8 @@ local function createNPCOrder(job, locationKey)
         items = items,
         total = total,
         status = 'pending',
-        createdAt = os.time(),
-        expiresAt = os.time() + NPCConfig.orders.orderTimeout,
+        createdAt = currentTime,
+        expiresAt = currentTime + (NPCConfig.orders.orderTimeout * 1000), -- Convert to ms
     }
     
     -- Notify staff
@@ -317,8 +330,9 @@ end
 local function completeNPCOrder(orderId, employeeSource)
     local npcOrder = npcOrders[orderId]
     if not npcOrder then return end
-    
-    local waitTime = os.time() - npcOrder.createdAt
+
+    -- Calculate wait time in seconds (GetGameTimer returns ms)
+    local waitTime = (GetGameTimer() - npcOrder.createdAt) / 1000
     local tip = calculateTip(npcOrder.total, waitTime)
     
     -- Update order with tip
@@ -345,8 +359,8 @@ end
 
 --- Handle expired NPC orders
 local function checkExpiredOrders()
-    local currentTime = os.time()
-    
+    local currentTime = GetGameTimer()
+
     for orderId, npcOrder in pairs(npcOrders) do
         if currentTime > npcOrder.expiresAt then
             -- NPC leaves unhappy
