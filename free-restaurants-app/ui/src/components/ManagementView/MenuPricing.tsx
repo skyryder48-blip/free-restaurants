@@ -80,7 +80,7 @@ export default function MenuPricing({ access: _access }: MenuPricingProps) {
   const categories = ['all', ...new Set(items.map(item => item.category))];
 
   const filteredItems = items.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });

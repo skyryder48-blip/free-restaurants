@@ -89,7 +89,7 @@ export default function EmployeeList({ access }: EmployeeListProps) {
   }, []);
 
   const filteredEmployees = employees.filter(emp =>
-    emp.name.toLowerCase().includes(searchTerm.toLowerCase())
+    (emp.name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const getGradeColor = (grade: number) => {
