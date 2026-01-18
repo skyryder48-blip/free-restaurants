@@ -22,7 +22,8 @@ server_scripts {
     'server/main.lua',
 }
 
-ui_page 'ui/dist/index.html'
+-- NOTE: No ui_page directive - LB Phone/Tablet loads the UI in its own iframe
+-- The files are served via cfx-nui-resourcename URL
 
 files {
     'ui/dist/index.html',
