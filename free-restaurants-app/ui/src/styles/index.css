@@ -2585,3 +2585,45 @@ body {
 .surface-elevated {
   background: var(--bg-card);
 }
+
+/* ============================================
+   LOADING STATE
+   ============================================ */
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  background: var(--gradient-dark);
+}
+
+.loading-spinner {
+  width: 3rem;
+  height: 3rem;
+  border: 3px solid rgba(255, 107, 53, 0.2);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  margin-top: var(--spacing-lg);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.loading-subtext {
+  margin-top: var(--spacing-sm);
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
