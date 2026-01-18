@@ -318,17 +318,7 @@ openManagementMenu = function(locationKey, locationData)
             end,
         })
     end
-    
-    -- Business Storage
-    table.insert(options, {
-        title = 'Business Storage',
-        description = 'Access shared storage',
-        icon = 'warehouse',
-        onSelect = function()
-            openBusinessStorage(locationKey, locationData)
-        end,
-    })
-    
+
     lib.registerContext({
         id = 'management_menu',
         title = 'Management',
@@ -1006,18 +996,21 @@ end
 openPricingMenu = function(locationKey, locationData)
     -- Get current pricing
     local pricing = lib.callback.await('free-restaurants:server:getPricing', false, locationData.job)
-    
+
     local options = {}
-    
-    if pricing then
+
+    if pricing and next(pricing) then
         for itemId, data in pairs(pricing) do
             local recipe = Config.Recipes[itemId]
-            if recipe then
+            if recipe and recipe.label then
+                local currentPrice = data.price or recipe.price or 0
+                local basePrice = recipe.price or 0
+
                 table.insert(options, {
                     title = recipe.label,
                     description = ('Current: %s (Base: %s)'):format(
-                        FreeRestaurants.Utils.FormatMoney(data.price),
-                        FreeRestaurants.Utils.FormatMoney(recipe.price)
+                        FreeRestaurants.Utils.FormatMoney(currentPrice),
+                        FreeRestaurants.Utils.FormatMoney(basePrice)
                     ),
                     icon = 'tag',
                     onSelect = function()
@@ -1026,21 +1019,33 @@ openPricingMenu = function(locationKey, locationData)
                 })
             end
         end
+    else
+        table.insert(options, {
+            title = 'No Menu Items',
+            description = 'No items configured for this restaurant',
+            icon = 'info',
+            disabled = true,
+        })
     end
-    
+
     lib.registerContext({
         id = 'pricing_menu',
         title = 'Menu Pricing',
         menu = 'management_menu',
         options = options,
     })
-    
+
     lib.showContext('pricing_menu')
 end
 
 --- Set price for item
 setItemPrice = function(itemId, recipe, currentData, locationKey, locationData)
-    local basePrice = recipe.price
+    local basePrice = recipe.price or 0
+    if basePrice <= 0 then
+        lib.notify({ title = 'Error', description = 'Invalid base price', type = 'error' })
+        return
+    end
+
     local priceFloor = Config.Economy and Config.Economy.Pricing and Config.Economy.Pricing.priceFloor or 0.5
     local priceCeiling = Config.Economy and Config.Economy.Pricing and Config.Economy.Pricing.priceCeiling or 2.0
     local minPrice = math.floor(basePrice * priceFloor)
