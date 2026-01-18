@@ -471,7 +471,43 @@ lib.callback.register('free-restaurants:server:getStockItems', function(source, 
     return stockItems
 end)
 
---- Order stock
+-- Active stock pickup missions (keyed by order_id)
+local activeStockOrders = {}
+
+--- Generate unique stock order ID
+local stockOrderCounter = 0
+local function generateStockOrderId()
+    stockOrderCounter = stockOrderCounter + 1
+    -- Use GetGameTimer() which returns ms since resource start - FiveM compatible
+    local timestamp = GetGameTimer() % 100000
+    return ('SO%05d%03d'):format(timestamp, stockOrderCounter % 1000)
+end
+
+--- Get random pickup location
+local function getRandomPickupLocation()
+    local locations = Config.Business and Config.Business.Stock and Config.Business.Stock.pickup and Config.Business.Stock.pickup.locations
+    if not locations or #locations == 0 then
+        -- Default location if none configured
+        return {
+            label = 'Warehouse',
+            coords = vec3(863.4, -2977.5, 5.9),
+            heading = 270.0,
+        }
+    end
+    return locations[math.random(#locations)]
+end
+
+--- Notify all on-duty employees of a job
+local function notifyJobEmployees(job, eventName, data)
+    local players = exports.qbx_core:GetQBPlayers()
+    for _, player in pairs(players) do
+        if player.PlayerData.job.name == job and player.PlayerData.job.onduty then
+            TriggerClientEvent(eventName, player.PlayerData.source, data)
+        end
+    end
+end
+
+--- Order stock - Creates pickup mission
 lib.callback.register('free-restaurants:server:orderStock', function(source, job, itemName, quantity)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return false end
@@ -482,14 +518,14 @@ lib.callback.register('free-restaurants:server:orderStock', function(source, job
 
     -- Find item and price from default list or config
     local defaultStockItems = {
-        { name = 'bun', label = 'Burger Buns', price = 5 },
-        { name = 'patty_raw', label = 'Raw Patties', price = 10 },
-        { name = 'lettuce', label = 'Lettuce', price = 3 },
-        { name = 'tomato', label = 'Tomatoes', price = 3 },
-        { name = 'cheese', label = 'Cheese Slices', price = 4 },
-        { name = 'fries_raw', label = 'Frozen Fries', price = 8 },
-        { name = 'soda_syrup', label = 'Soda Syrup', price = 15 },
-        { name = 'napkins', label = 'Napkins', price = 2 },
+        { name = 'bun', label = 'Burger Buns', price = 5, weight = 50 },
+        { name = 'patty_raw', label = 'Raw Patties', price = 10, weight = 200 },
+        { name = 'lettuce', label = 'Lettuce', price = 3, weight = 100 },
+        { name = 'tomato', label = 'Tomatoes', price = 3, weight = 150 },
+        { name = 'cheese', label = 'Cheese Slices', price = 4, weight = 50 },
+        { name = 'fries_raw', label = 'Frozen Fries', price = 8, weight = 500 },
+        { name = 'soda_syrup', label = 'Soda Syrup', price = 15, weight = 1000 },
+        { name = 'napkins', label = 'Napkins', price = 2, weight = 20 },
     }
 
     local stockItems = Config.Stock and Config.Stock[job] or defaultStockItems
@@ -525,33 +561,320 @@ lib.callback.register('free-restaurants:server:orderStock', function(source, job
         player.PlayerData.citizenid
     )
 
-    if success then
-        -- Add items to business storage - use location-based stash
-        -- Find the first enabled location for this job
-        for restaurantType, locations in pairs(Config.Locations) do
-            if type(locations) == 'table' then
-                for locationId, locationData in pairs(locations) do
-                    if type(locationData) == 'table' and locationData.enabled and locationData.job == job then
-                        local stashId = ('restaurant_%s_%s_storage'):format(restaurantType, locationId)
-                        exports.ox_inventory:AddItem(stashId, itemName, quantity)
-                        print(('[free-restaurants] %s ordered %dx %s ($%d) for %s -> %s'):format(
-                            player.PlayerData.citizenid, quantity, itemData.label, totalCost, job, stashId
-                        ))
-                        return true
-                    end
-                end
+    if not success then
+        return false
+    end
+
+    -- Generate order ID and get pickup location
+    local orderId = generateStockOrderId()
+    local pickupLocation = getRandomPickupLocation()
+
+    -- Calculate item weight and create crates
+    local itemWeight = itemData.weight or 100 -- default 100g if not specified
+    local totalWeight = itemWeight * quantity
+    local maxCrateWeight = Config.Business and Config.Business.Stock and Config.Business.Stock.pickup and Config.Business.Stock.pickup.maxCrateWeight or 10000
+
+    -- Bundle items into crates (max 10kg each)
+    local crates = {}
+    local remainingQty = quantity
+    while remainingQty > 0 do
+        local crateQty = math.min(remainingQty, math.floor(maxCrateWeight / itemWeight))
+        if crateQty < 1 then crateQty = 1 end
+        table.insert(crates, {
+            item = itemName,
+            label = itemData.label,
+            quantity = crateQty,
+            weight = crateQty * itemWeight,
+        })
+        remainingQty = remainingQty - crateQty
+    end
+
+    -- Store the order
+    local expiryTime = Config.Business and Config.Business.Stock and Config.Business.Stock.pickup and Config.Business.Stock.pickup.expiryTime or 60
+    -- Use GetGameTimer() for relative expiry tracking (ms from now)
+    local expiryMs = GetGameTimer() + (expiryTime * 60 * 1000)
+    local orderData = {
+        orderId = orderId,
+        job = job,
+        items = crates,
+        totalCost = totalCost,
+        location = pickupLocation,
+        orderedBy = player.PlayerData.citizenid,
+        orderedByName = ('%s %s'):format(player.PlayerData.charinfo.firstname, player.PlayerData.charinfo.lastname),
+        createdAt = GetGameTimer(),
+        expiresAt = expiryMs,
+        pickedUp = false,
+        cratesRemaining = #crates,
+    }
+
+    activeStockOrders[orderId] = orderData
+
+    -- Save to database using MySQL DATE_ADD for expiry
+    MySQL.query.await([[
+        INSERT INTO restaurant_stock_orders (order_id, job, items, total_cost, status, pickup_coords, ordered_by, expires_at)
+        VALUES (?, ?, ?, ?, 'ready', ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))
+    ]], {
+        orderId,
+        job,
+        json.encode(crates),
+        totalCost,
+        ('%s,%s,%s'):format(pickupLocation.coords.x, pickupLocation.coords.y, pickupLocation.coords.z),
+        player.PlayerData.citizenid,
+        expiryTime,
+    })
+
+    -- Notify all on-duty employees
+    notifyJobEmployees(job, 'free-restaurants:client:stockOrderReady', {
+        orderId = orderId,
+        location = pickupLocation,
+        crateCount = #crates,
+        itemLabel = itemData.label,
+        quantity = quantity,
+    })
+
+    print(('[free-restaurants] Stock order %s created: %dx %s, %d crates at %s'):format(
+        orderId, quantity, itemData.label, #crates, pickupLocation.label
+    ))
+
+    return true, orderId
+end)
+
+--- Get active stock orders for a job
+lib.callback.register('free-restaurants:server:getActiveStockOrders', function(source, job)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return {} end
+
+    if player.PlayerData.job.name ~= job then return {} end
+
+    local orders = {}
+    for orderId, orderData in pairs(activeStockOrders) do
+        if orderData.job == job and not orderData.pickedUp and orderData.cratesRemaining > 0 then
+            table.insert(orders, {
+                orderId = orderId,
+                location = orderData.location,
+                cratesRemaining = orderData.cratesRemaining,
+                items = orderData.items,
+                expiresAt = orderData.expiresAt,
+            })
+        end
+    end
+
+    return orders
+end)
+
+--- Pickup a stock crate
+lib.callback.register('free-restaurants:server:pickupStockCrate', function(source, orderId)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false end
+
+    local orderData = activeStockOrders[orderId]
+    if not orderData then
+        return false, 'Order not found'
+    end
+
+    if player.PlayerData.job.name ~= orderData.job then
+        return false, 'Wrong job'
+    end
+
+    if not player.PlayerData.job.onduty then
+        return false, 'Not on duty'
+    end
+
+    if orderData.cratesRemaining <= 0 then
+        return false, 'No crates remaining'
+    end
+
+    -- Get the next crate to pickup
+    local crateIndex = #orderData.items - orderData.cratesRemaining + 1
+    local crateData = orderData.items[crateIndex]
+
+    if not crateData then
+        return false, 'Crate data missing'
+    end
+
+    -- Create the stock_crate item with metadata
+    local crateMetadata = {
+        orderId = orderId,
+        contents = {
+            item = crateData.item,
+            label = crateData.label,
+            quantity = crateData.quantity,
+        },
+        job = orderData.job,
+        description = ('Contains %dx %s'):format(crateData.quantity, crateData.label),
+    }
+
+    -- Check if player can carry the crate
+    local canCarry = exports.ox_inventory:CanCarryItem(source, 'stock_crate', 1)
+    if not canCarry then
+        return false, 'Inventory full'
+    end
+
+    -- Give the crate to the player
+    local success = exports.ox_inventory:AddItem(source, 'stock_crate', 1, crateMetadata)
+    if not success then
+        return false, 'Failed to add crate'
+    end
+
+    -- Update remaining crates
+    orderData.cratesRemaining = orderData.cratesRemaining - 1
+
+    -- Check if all crates picked up
+    if orderData.cratesRemaining <= 0 then
+        orderData.pickedUp = true
+
+        -- Update database
+        MySQL.query.await([[
+            UPDATE restaurant_stock_orders SET status = 'picked_up', picked_up_by = ? WHERE order_id = ?
+        ]], { player.PlayerData.citizenid, orderId })
+
+        -- Notify all employees that order is complete
+        notifyJobEmployees(orderData.job, 'free-restaurants:client:stockOrderComplete', {
+            orderId = orderId,
+            pickedUpBy = ('%s %s'):format(player.PlayerData.charinfo.firstname, player.PlayerData.charinfo.lastname),
+        })
+
+        -- Remove from active orders after a delay
+        SetTimeout(5000, function()
+            activeStockOrders[orderId] = nil
+        end)
+    else
+        -- Notify remaining crates
+        notifyJobEmployees(orderData.job, 'free-restaurants:client:stockCratePickedUp', {
+            orderId = orderId,
+            remaining = orderData.cratesRemaining,
+            pickedUpBy = ('%s %s'):format(player.PlayerData.charinfo.firstname, player.PlayerData.charinfo.lastname),
+        })
+    end
+
+    print(('[free-restaurants] %s picked up crate from order %s (%d remaining)'):format(
+        player.PlayerData.citizenid, orderId, orderData.cratesRemaining
+    ))
+
+    return true, orderData.cratesRemaining
+end)
+
+--- Open stock crate - extract contents
+lib.callback.register('free-restaurants:server:openStockCrate', function(source, slot)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return false end
+
+    -- Get the crate item from the slot
+    local inventory = exports.ox_inventory:GetInventory(source)
+    if not inventory then return false end
+
+    local crateItem = exports.ox_inventory:GetSlot(source, slot)
+    if not crateItem or crateItem.name ~= 'stock_crate' then
+        return false, 'Invalid crate'
+    end
+
+    local metadata = crateItem.metadata
+    if not metadata or not metadata.contents then
+        return false, 'Crate has no contents'
+    end
+
+    local contents = metadata.contents
+
+    -- Check if player can carry the contents
+    local canCarry = exports.ox_inventory:CanCarryItem(source, contents.item, contents.quantity)
+    if not canCarry then
+        return false, 'Cannot carry contents - inventory full'
+    end
+
+    -- Remove the crate
+    local removed = exports.ox_inventory:RemoveItem(source, 'stock_crate', 1, nil, slot)
+    if not removed then
+        return false, 'Failed to remove crate'
+    end
+
+    -- Add the contents
+    local added = exports.ox_inventory:AddItem(source, contents.item, contents.quantity)
+    if not added then
+        -- Refund the crate if we fail to add contents
+        exports.ox_inventory:AddItem(source, 'stock_crate', 1, metadata)
+        return false, 'Failed to add contents'
+    end
+
+    print(('[free-restaurants] %s opened stock crate: %dx %s'):format(
+        player.PlayerData.citizenid, contents.quantity, contents.item
+    ))
+
+    return true, contents
+end)
+
+--- Cleanup expired stock orders
+CreateThread(function()
+    while true do
+        Wait(60000) -- Check every minute
+
+        local now = GetGameTimer()
+        for orderId, orderData in pairs(activeStockOrders) do
+            if orderData.expiresAt and now > orderData.expiresAt and not orderData.pickedUp then
+                -- Mark as expired
+                MySQL.query.await([[
+                    UPDATE restaurant_stock_orders SET status = 'expired' WHERE order_id = ?
+                ]], { orderId })
+
+                -- Notify employees
+                notifyJobEmployees(orderData.job, 'free-restaurants:client:stockOrderExpired', {
+                    orderId = orderId,
+                })
+
+                -- Remove from active orders
+                activeStockOrders[orderId] = nil
+
+                print(('[free-restaurants] Stock order %s expired'):format(orderId))
             end
         end
 
-        -- Fallback stash if no location found
-        local stashId = ('restaurant_business_%s'):format(job)
-        exports.ox_inventory:AddItem(stashId, itemName, quantity)
-        print(('[free-restaurants] %s ordered %dx %s ($%d) for %s'):format(
-            player.PlayerData.citizenid, quantity, itemData.label, totalCost, job
-        ))
+        -- Also check database for any orders that expired (backup check using MySQL time)
+        MySQL.query.await([[
+            UPDATE restaurant_stock_orders SET status = 'expired'
+            WHERE status = 'ready' AND expires_at < NOW()
+        ]])
     end
+end)
 
-    return success
+--- Load pending stock orders on resource start
+CreateThread(function()
+    Wait(2000) -- Wait for database connection
+
+    -- Query includes seconds until expiry so we can calculate relative expiry time
+    local results = MySQL.query.await([[
+        SELECT *, TIMESTAMPDIFF(SECOND, NOW(), expires_at) as seconds_until_expiry
+        FROM restaurant_stock_orders
+        WHERE status = 'ready' AND expires_at > NOW()
+    ]])
+
+    if results then
+        local currentTime = GetGameTimer()
+        for _, row in ipairs(results) do
+            local coords = row.pickup_coords and row.pickup_coords:gmatch('[^,]+')
+            local x, y, z = coords(), coords(), coords()
+
+            -- Calculate expiry time relative to current GetGameTimer()
+            local secondsUntilExpiry = row.seconds_until_expiry or 0
+            local expiryMs = currentTime + (secondsUntilExpiry * 1000)
+
+            activeStockOrders[row.order_id] = {
+                orderId = row.order_id,
+                job = row.job,
+                items = json.decode(row.items) or {},
+                totalCost = row.total_cost,
+                location = {
+                    label = 'Pickup Location',
+                    coords = vec3(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0),
+                },
+                orderedBy = row.ordered_by,
+                createdAt = currentTime,
+                expiresAt = expiryMs,
+                pickedUp = false,
+                cratesRemaining = #(json.decode(row.items) or {}),
+            }
+        end
+
+        print(('[free-restaurants] Loaded %d pending stock orders'):format(#results))
+    end
 end)
 
 -- ============================================================================
@@ -660,14 +983,42 @@ lib.callback.register('free-restaurants:server:setWage', function(source, job, g
         return false
     end
 
-    -- Update config (runtime only - would need separate persistence for permanent changes)
+    -- Update runtime config
     if Config.Jobs[job] and Config.Jobs[job].grades[grade] then
         Config.Jobs[job].grades[grade].payment = wage
+
+        -- Persist to database
+        MySQL.query.await([[
+            INSERT INTO restaurant_payroll (job, grade, wage)
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE wage = ?
+        ]], { job, grade, wage, wage })
+
         print(('[free-restaurants] Wage updated for %s grade %d to $%d'):format(job, grade, wage))
         return true
     end
 
     return false
+end)
+
+--- Load saved payroll settings on resource start
+local function loadPayrollSettings()
+    local results = MySQL.query.await('SELECT * FROM restaurant_payroll')
+
+    if results then
+        for _, row in ipairs(results) do
+            if Config.Jobs[row.job] and Config.Jobs[row.job].grades[row.grade] then
+                Config.Jobs[row.job].grades[row.grade].payment = row.wage
+                print(('[free-restaurants] Loaded wage for %s grade %d: $%d'):format(row.job, row.grade, row.wage))
+            end
+        end
+    end
+end
+
+-- Load payroll on startup
+CreateThread(function()
+    Wait(1000) -- Wait for database connection
+    loadPayrollSettings()
 end)
 
 -- ============================================================================
