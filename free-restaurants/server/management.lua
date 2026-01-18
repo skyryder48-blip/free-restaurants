@@ -120,10 +120,13 @@ local function getEmployees(job)
             
             table.insert(employees, {
                 citizenid = row.citizenid,
+                name = ('%s %s'):format(charinfo.firstname or '', charinfo.lastname or ''),
                 firstname = charinfo.firstname,
                 lastname = charinfo.lastname,
                 grade = jobData.grade.level,
+                gradeLabel = jobData.grade.name,
                 gradeName = jobData.grade.name,
+                onduty = onlinePlayer and onlinePlayer.PlayerData.job.onduty or false,
                 onDuty = onlinePlayer and onlinePlayer.PlayerData.job.onduty or false,
                 online = onlinePlayer ~= nil,
             })

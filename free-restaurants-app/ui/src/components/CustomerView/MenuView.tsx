@@ -26,7 +26,7 @@ export default function MenuView({
   config,
 }: MenuViewProps) {
   const [activeCategory, setActiveCategory] = useState<string>(
-    menu.categories[0] || 'All'
+    menu?.categories?.[0] || 'All'
   );
 
   const getCartQuantity = (itemId: string): number => {
@@ -36,8 +36,8 @@ export default function MenuView({
 
   const filteredItems =
     activeCategory === 'All'
-      ? menu.items
-      : menu.items.filter(item => item.category === activeCategory);
+      ? (menu?.items || [])
+      : (menu?.items || []).filter(item => item.category === activeCategory);
 
   const typeStyle = config?.restaurantTypes?.[restaurant.type] ||
     config?.restaurantTypes?.default || { color: '#ff6b35' };
@@ -65,7 +65,7 @@ export default function MenuView({
       {/* Category Tabs */}
       <div className="category-tabs">
         <div className="category-scroll">
-          {['All', ...menu.categories].map(category => (
+          {['All', ...(menu?.categories || [])].map(category => (
             <button
               key={category}
               className={`category-tab ${activeCategory === category ? 'active' : ''}`}
