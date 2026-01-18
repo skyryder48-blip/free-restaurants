@@ -702,6 +702,96 @@ RegisterNetEvent('free-restaurants-app:newOrderReceived', function(data)
 end)
 
 -- ============================================================================
+-- DELIVERY TRACKING
+-- ============================================================================
+
+local activeDeliveryBlip = nil
+local activeDeliveryData = nil
+
+-- Start delivery - set GPS waypoint
+RegisterNetEvent('free-restaurants-app:startDelivery', function(data)
+    activeDeliveryData = data
+
+    -- Parse delivery coords
+    local coords = nil
+    if data.deliveryCoords and type(data.deliveryCoords) == 'string' then
+        local x, y, z = data.deliveryCoords:match('([^,]+),([^,]+),([^,]+)')
+        if x and y and z then
+            coords = vector3(tonumber(x), tonumber(y), tonumber(z))
+        end
+    elseif data.deliveryCoords and type(data.deliveryCoords) == 'table' then
+        coords = vector3(data.deliveryCoords.x, data.deliveryCoords.y, data.deliveryCoords.z)
+    end
+
+    if not coords then
+        lib.notify({
+            title = 'Delivery Error',
+            description = 'Could not get delivery location',
+            type = 'error',
+        })
+        return
+    end
+
+    -- Remove old blip if exists
+    if activeDeliveryBlip then
+        RemoveBlip(activeDeliveryBlip)
+    end
+
+    -- Create delivery blip
+    activeDeliveryBlip = AddBlipForCoord(coords.x, coords.y, coords.z)
+    SetBlipSprite(activeDeliveryBlip, 1) -- Standard waypoint
+    SetBlipDisplay(activeDeliveryBlip, 4)
+    SetBlipScale(activeDeliveryBlip, 1.0)
+    SetBlipColour(activeDeliveryBlip, 5) -- Yellow
+    SetBlipAsShortRange(activeDeliveryBlip, false)
+    BeginTextCommandSetBlipName('STRING')
+    AddTextComponentSubstringPlayerName('Delivery: ' .. (data.customerName or 'Customer'))
+    EndTextCommandSetBlipName(activeDeliveryBlip)
+
+    -- Set waypoint
+    SetNewWaypoint(coords.x, coords.y)
+
+    -- Notify driver
+    lib.notify({
+        title = 'Delivery Started',
+        description = ('Deliver to %s\nGPS waypoint has been set'):format(data.customerName or 'customer'),
+        type = 'success',
+        duration = 8000,
+    })
+
+    if Config.Debug then
+        print(('[Food Hub] Delivery started to %s at coords: %s'):format(
+            data.customerName or 'unknown',
+            data.deliveryCoords
+        ))
+    end
+end)
+
+-- Complete delivery - triggered when driver reaches destination
+RegisterNetEvent('free-restaurants-app:completeDelivery', function(orderId)
+    if activeDeliveryBlip then
+        RemoveBlip(activeDeliveryBlip)
+        activeDeliveryBlip = nil
+    end
+    activeDeliveryData = nil
+
+    lib.notify({
+        title = 'Delivery Complete',
+        description = 'Order delivered successfully!',
+        type = 'success',
+    })
+end)
+
+-- Cancel/clear active delivery
+RegisterNetEvent('free-restaurants-app:clearDelivery', function()
+    if activeDeliveryBlip then
+        RemoveBlip(activeDeliveryBlip)
+        activeDeliveryBlip = nil
+    end
+    activeDeliveryData = nil
+end)
+
+-- ============================================================================
 -- INITIALIZATION
 -- ============================================================================
 
