@@ -350,6 +350,18 @@ lib.callback.register('free-restaurants-app:placeOrder', function(source, data)
     -- Charge player
     player.Functions.RemoveMoney('bank', total, 'food-hub-order')
 
+    -- Add money to restaurant business account (same as kiosk orders)
+    local businessCut = 1.0 -- 100% goes to business, can be adjusted if needed
+    local businessAmount = math.floor(total * businessCut)
+
+    exports['free-restaurants']:UpdateBusinessBalance(
+        job,
+        businessAmount,
+        'sale',
+        ('App Order - %s'):format(data.orderType == 'delivery' and 'Delivery' or 'Pickup'),
+        player.PlayerData.citizenid
+    )
+
     -- Generate order
     local orderId = generateOrderId()
     local orderData = {
@@ -606,6 +618,15 @@ lib.callback.register('free-restaurants-app:handleAppOrder', function(source, da
 
     elseif data.action == 'reject' then
         order.status = 'cancelled'
+
+        -- Deduct from business account (reverse the sale)
+        exports['free-restaurants']:UpdateBusinessBalance(
+            order.job,
+            -order.total,
+            'refund',
+            ('App Order Refund - #%s'):format(order.orderId),
+            player.PlayerData.citizenid
+        )
 
         -- Refund customer
         local players = exports.qbx_core:GetQBPlayers()
