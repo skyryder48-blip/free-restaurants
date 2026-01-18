@@ -168,10 +168,28 @@ lib.callback.register('free-restaurants-app:getOpenRestaurants', function(source
     local restaurantJobs = exports['free-restaurants']:GetRestaurantJobs()
     if not restaurantJobs then return restaurants end
 
+    -- Check which restaurants have staff on duty
+    local staffOnDuty = {}
+    local players = exports.qbx_core:GetQBPlayers()
+    for _, player in pairs(players) do
+        if player.PlayerData.job.onduty then
+            local job = player.PlayerData.job.name
+            staffOnDuty[job] = (staffOnDuty[job] or 0) + 1
+        end
+    end
+
     for jobName, jobConfig in pairs(restaurantJobs) do
         local status = restaurantStatus[jobName]
+        local hasStaff = staffOnDuty[jobName] and staffOnDuty[jobName] > 0
 
-        if status and status.open then
+        -- Restaurant is available if:
+        -- 1. Explicitly set to open via status toggle, OR
+        -- 2. Has staff on duty (auto-open mode)
+        local isOpen = (status and status.open) or hasStaff
+        local acceptsPickup = (status and status.acceptsPickup) or hasStaff
+        local acceptsDelivery = (status and status.acceptsDelivery) or false -- Delivery needs explicit enable
+
+        if isOpen then
             -- Find restaurant location for coords
             local locationCoords = nil
             local locations = exports['free-restaurants']:GetRestaurantLocations()
@@ -195,9 +213,10 @@ lib.callback.register('free-restaurants-app:getOpenRestaurants', function(source
                 name = jobConfig.label or jobName,
                 type = jobConfig.type or 'default',
                 isOpen = true,
-                acceptsPickup = status.acceptsPickup or false,
-                acceptsDelivery = status.acceptsDelivery or false,
+                acceptsPickup = acceptsPickup,
+                acceptsDelivery = acceptsDelivery,
                 coords = locationCoords,
+                staffCount = staffOnDuty[jobName] or 0,
             })
         end
     end
