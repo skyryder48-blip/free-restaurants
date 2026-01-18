@@ -1041,8 +1041,10 @@ end
 --- Set price for item
 setItemPrice = function(itemId, recipe, currentData, locationKey, locationData)
     local basePrice = recipe.price
-    local minPrice = math.floor(basePrice * Config.Economy.Pricing.priceFloor)
-    local maxPrice = math.floor(basePrice * Config.Economy.Pricing.priceCeiling)
+    local priceFloor = Config.Economy and Config.Economy.Pricing and Config.Economy.Pricing.priceFloor or 0.5
+    local priceCeiling = Config.Economy and Config.Economy.Pricing and Config.Economy.Pricing.priceCeiling or 2.0
+    local minPrice = math.floor(basePrice * priceFloor)
+    local maxPrice = math.floor(basePrice * priceCeiling)
     
     local input = lib.inputDialog('Set Price: ' .. recipe.label, {
         {
