@@ -58,17 +58,32 @@ end
 ---@return boolean
 local function hasServerPermission(source, job, permission)
     local player = exports.qbx_core:GetPlayer(source)
-    if not player then return false end
+    if not player then
+        print(('[free-restaurants] hasServerPermission: player not found for source %d'):format(source))
+        return false
+    end
 
-    if player.PlayerData.job.name ~= job then return false end
+    if player.PlayerData.job.name ~= job then
+        print(('[free-restaurants] hasServerPermission: job mismatch - player has %s, needed %s'):format(player.PlayerData.job.name, job))
+        return false
+    end
 
     local gradeLevel = player.PlayerData.job.grade.level
-    local perms = getEffectivePermissions(job, gradeLevel)
+    local perms, effectiveGrade = getEffectivePermissions(job, gradeLevel)
 
-    if not perms then return false end
-    if perms.all == true then return true end
+    if not perms then
+        print(('[free-restaurants] hasServerPermission: no permissions found for %s grade %d'):format(job, gradeLevel))
+        return false
+    end
 
-    return perms[permission] == true
+    if perms.all == true then
+        print(('[free-restaurants] hasServerPermission: %s has ALL permissions'):format(permission))
+        return true
+    end
+
+    local hasIt = perms[permission] == true
+    print(('[free-restaurants] hasServerPermission: %s = %s'):format(permission, tostring(hasIt)))
+    return hasIt
 end
 
 -- ============================================================================
@@ -323,6 +338,55 @@ lib.callback.register('free-restaurants:server:getTransactions', function(source
 end)
 
 -- ============================================================================
+-- UTILITY CALLBACKS
+-- ============================================================================
+
+--- Get nearby players for hiring
+lib.callback.register('free-restaurants:server:getNearbyPlayers', function(source, radius)
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return {} end
+
+    local playerPed = GetPlayerPed(source)
+    local playerCoords = GetEntityCoords(playerPed)
+    radius = radius or 10.0
+
+    local nearbyPlayers = {}
+    local players = exports.qbx_core:GetQBPlayers()
+
+    for _, targetPlayer in pairs(players) do
+        local targetSource = targetPlayer.PlayerData.source
+        if targetSource ~= source then
+            local targetPed = GetPlayerPed(targetSource)
+            local targetCoords = GetEntityCoords(targetPed)
+            local distance = #(playerCoords - targetCoords)
+
+            if distance <= radius then
+                -- Check if player doesn't already work at a restaurant
+                local targetJob = targetPlayer.PlayerData.job.name
+                local isRestaurantEmployee = Config.Jobs[targetJob] ~= nil
+
+                table.insert(nearbyPlayers, {
+                    id = targetSource,
+                    name = ('%s %s'):format(
+                        targetPlayer.PlayerData.charinfo.firstname,
+                        targetPlayer.PlayerData.charinfo.lastname
+                    ),
+                    citizenid = targetPlayer.PlayerData.citizenid,
+                    currentJob = targetJob,
+                    isRestaurantEmployee = isRestaurantEmployee,
+                    distance = distance,
+                })
+            end
+        end
+    end
+
+    -- Sort by distance
+    table.sort(nearbyPlayers, function(a, b) return a.distance < b.distance end)
+
+    return nearbyPlayers
+end)
+
+-- ============================================================================
 -- EMPLOYEE CALLBACKS
 -- ============================================================================
 
@@ -336,11 +400,16 @@ lib.callback.register('free-restaurants:server:getEmployees', function(source, j
 end)
 
 lib.callback.register('free-restaurants:server:hireEmployee', function(source, targetId, job, grade)
+    print(('[free-restaurants] hireEmployee callback: source=%d, target=%d, job=%s, grade=%s'):format(source, targetId, job, tostring(grade)))
+
     if not hasServerPermission(source, job, 'canHire') then
+        print('[free-restaurants] hireEmployee: permission denied')
         return false
     end
 
-    return hireEmployee(targetId, job, grade)
+    local result = hireEmployee(targetId, job, grade)
+    print(('[free-restaurants] hireEmployee result: %s'):format(tostring(result)))
+    return result
 end)
 
 lib.callback.register('free-restaurants:server:fireEmployee', function(source, citizenid, job)
@@ -493,24 +562,54 @@ end)
 lib.callback.register('free-restaurants:server:getPricing', function(source, job)
     local player = exports.qbx_core:GetPlayer(source)
     if not player then return {} end
-    
+
     if player.PlayerData.job.name ~= job then return {} end
-    
+
     -- Get custom prices from database
     local results = MySQL.query.await('SELECT * FROM restaurant_pricing WHERE job = ?', { job })
-    
+
     local pricing = {}
-    
-    -- Start with base recipe prices
-    for recipeId, recipe in pairs(Config.Recipes) do
-        if recipe.restaurantType and recipe.restaurantType == job or not recipe.restaurantType then
+    local count = 0
+
+    -- Debug: Check if Config.Recipes.Items exists
+    if not Config.Recipes or not Config.Recipes.Items then
+        print('[free-restaurants] getPricing: Config.Recipes.Items is nil!')
+        return {}
+    end
+
+    -- Get the restaurant type from job config
+    local jobConfig = Config.Jobs[job]
+    local jobRestaurantType = jobConfig and jobConfig.type or nil
+
+    -- Start with base recipe prices - include all recipes for this job
+    for recipeId, recipe in pairs(Config.Recipes.Items) do
+        local shouldInclude = false
+
+        -- Check if recipe has no restaurantTypes (generic) or matches the job's type
+        if not recipe.restaurantTypes or #recipe.restaurantTypes == 0 then
+            -- Generic recipe - include for all
+            shouldInclude = true
+        elseif jobRestaurantType then
+            -- Check if job's restaurant type is in the recipe's restaurantTypes array
+            for _, rType in ipairs(recipe.restaurantTypes) do
+                if rType == jobRestaurantType then
+                    shouldInclude = true
+                    break
+                end
+            end
+        end
+
+        if shouldInclude and recipe.basePrice then
             pricing[recipeId] = {
-                price = recipe.price or 0,
-                basePrice = recipe.price or 0,
+                price = recipe.basePrice,
+                basePrice = recipe.basePrice,
             }
+            count = count + 1
         end
     end
-    
+
+    print(('[free-restaurants] getPricing: found %d recipes for job %s (type: %s)'):format(count, job, tostring(jobRestaurantType)))
+
     -- Override with custom prices
     if results then
         for _, row in ipairs(results) do
@@ -519,7 +618,7 @@ lib.callback.register('free-restaurants:server:getPricing', function(source, job
             end
         end
     end
-    
+
     return pricing
 end)
 
@@ -530,9 +629,9 @@ lib.callback.register('free-restaurants:server:setPrice', function(source, job, 
     end
 
     -- Validate price range
-    local recipe = Config.Recipes[itemId]
+    local recipe = Config.Recipes and Config.Recipes.Items and Config.Recipes.Items[itemId]
     if recipe then
-        local basePrice = recipe.price or 0
+        local basePrice = recipe.basePrice or 0
         local minPrice = math.floor(basePrice * (Config.Economy and Config.Economy.Pricing and Config.Economy.Pricing.priceFloor or 0.5))
         local maxPrice = math.floor(basePrice * (Config.Economy and Config.Economy.Pricing and Config.Economy.Pricing.priceCeiling or 2.0))
 
