@@ -622,6 +622,7 @@ exports('SetActiveStation', function(station) updatePlayerState('activeStation',
 exports('HasRestaurantJob', hasRestaurantJob)
 exports('GetRestaurantJobData', getRestaurantJobData)
 exports('HasPermission', hasPermission)
+exports('GetRestaurantJobs', function() return Config.Jobs end)
 
 -- Location utilities
 exports('GetLocationByKey', getLocationByKey)
