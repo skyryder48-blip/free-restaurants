@@ -478,8 +478,9 @@ local activeStockOrders = {}
 local stockOrderCounter = 0
 local function generateStockOrderId()
     stockOrderCounter = stockOrderCounter + 1
-    local timestamp = os.time() % 10000
-    return ('SO%04d%03d'):format(timestamp, stockOrderCounter % 1000)
+    -- Use GetGameTimer() which returns ms since resource start - FiveM compatible
+    local timestamp = GetGameTimer() % 100000
+    return ('SO%05d%03d'):format(timestamp, stockOrderCounter % 1000)
 end
 
 --- Get random pickup location
@@ -590,6 +591,8 @@ lib.callback.register('free-restaurants:server:orderStock', function(source, job
 
     -- Store the order
     local expiryTime = Config.Business and Config.Business.Stock and Config.Business.Stock.pickup and Config.Business.Stock.pickup.expiryTime or 60
+    -- Use GetGameTimer() for relative expiry tracking (ms from now)
+    local expiryMs = GetGameTimer() + (expiryTime * 60 * 1000)
     local orderData = {
         orderId = orderId,
         job = job,
@@ -598,18 +601,18 @@ lib.callback.register('free-restaurants:server:orderStock', function(source, job
         location = pickupLocation,
         orderedBy = player.PlayerData.citizenid,
         orderedByName = ('%s %s'):format(player.PlayerData.charinfo.firstname, player.PlayerData.charinfo.lastname),
-        createdAt = os.time(),
-        expiresAt = os.time() + (expiryTime * 60),
+        createdAt = GetGameTimer(),
+        expiresAt = expiryMs,
         pickedUp = false,
         cratesRemaining = #crates,
     }
 
     activeStockOrders[orderId] = orderData
 
-    -- Save to database
+    -- Save to database using MySQL DATE_ADD for expiry
     MySQL.query.await([[
         INSERT INTO restaurant_stock_orders (order_id, job, items, total_cost, status, pickup_coords, ordered_by, expires_at)
-        VALUES (?, ?, ?, ?, 'ready', ?, ?, FROM_UNIXTIME(?))
+        VALUES (?, ?, ?, ?, 'ready', ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))
     ]], {
         orderId,
         job,
@@ -617,7 +620,7 @@ lib.callback.register('free-restaurants:server:orderStock', function(source, job
         totalCost,
         ('%s,%s,%s'):format(pickupLocation.coords.x, pickupLocation.coords.y, pickupLocation.coords.z),
         player.PlayerData.citizenid,
-        orderData.expiresAt,
+        expiryTime,
     })
 
     -- Notify all on-duty employees
@@ -804,7 +807,7 @@ CreateThread(function()
     while true do
         Wait(60000) -- Check every minute
 
-        local now = os.time()
+        local now = GetGameTimer()
         for orderId, orderData in pairs(activeStockOrders) do
             if orderData.expiresAt and now > orderData.expiresAt and not orderData.pickedUp then
                 -- Mark as expired
@@ -823,6 +826,12 @@ CreateThread(function()
                 print(('[free-restaurants] Stock order %s expired'):format(orderId))
             end
         end
+
+        -- Also check database for any orders that expired (backup check using MySQL time)
+        MySQL.query.await([[
+            UPDATE restaurant_stock_orders SET status = 'expired'
+            WHERE status = 'ready' AND expires_at < NOW()
+        ]])
     end
 end)
 
@@ -830,14 +839,22 @@ end)
 CreateThread(function()
     Wait(2000) -- Wait for database connection
 
+    -- Query includes seconds until expiry so we can calculate relative expiry time
     local results = MySQL.query.await([[
-        SELECT * FROM restaurant_stock_orders WHERE status = 'ready' AND expires_at > NOW()
+        SELECT *, TIMESTAMPDIFF(SECOND, NOW(), expires_at) as seconds_until_expiry
+        FROM restaurant_stock_orders
+        WHERE status = 'ready' AND expires_at > NOW()
     ]])
 
     if results then
+        local currentTime = GetGameTimer()
         for _, row in ipairs(results) do
             local coords = row.pickup_coords and row.pickup_coords:gmatch('[^,]+')
             local x, y, z = coords(), coords(), coords()
+
+            -- Calculate expiry time relative to current GetGameTimer()
+            local secondsUntilExpiry = row.seconds_until_expiry or 0
+            local expiryMs = currentTime + (secondsUntilExpiry * 1000)
 
             activeStockOrders[row.order_id] = {
                 orderId = row.order_id,
@@ -849,8 +866,8 @@ CreateThread(function()
                     coords = vec3(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0),
                 },
                 orderedBy = row.ordered_by,
-                createdAt = row.created_at,
-                expiresAt = os.time(os.date('*t', row.expires_at)),
+                createdAt = currentTime,
+                expiresAt = expiryMs,
                 pickedUp = false,
                 cratesRemaining = #(json.decode(row.items) or {}),
             }
