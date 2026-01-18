@@ -13,12 +13,14 @@ import Dashboard from './Dashboard';
 import OrderQueue from './OrderQueue';
 import DeliveryList from './DeliveryList';
 import StaffList from './StaffList';
+import ManagementView from '../ManagementView';
 import {
   LayoutDashboard,
   ClipboardList,
   Car,
   Users,
   Settings,
+  Briefcase,
 } from 'lucide-react';
 
 interface EmployeeViewProps {
@@ -28,7 +30,7 @@ interface EmployeeViewProps {
   onSwitchToCustomer: () => void;
 }
 
-type Tab = 'dashboard' | 'orders' | 'deliveries' | 'staff' | 'settings';
+type Tab = 'dashboard' | 'orders' | 'deliveries' | 'staff' | 'management' | 'settings';
 
 export default function EmployeeView({
   access,
@@ -202,6 +204,15 @@ export default function EmployeeView({
           />
         );
 
+      case 'management':
+        return (
+          <ManagementView
+            access={access}
+            config={config}
+            onBack={() => setActiveTab('dashboard')}
+          />
+        );
+
       case 'settings':
         return (
           <div className="main-content">
@@ -303,6 +314,15 @@ export default function EmployeeView({
           <Users className="nav-item-icon" size={20} />
           <span>Staff</span>
         </button>
+        {access?.canManage && (
+          <button
+            className={`nav-item ${activeTab === 'management' ? 'active' : ''}`}
+            onClick={() => setActiveTab('management')}
+          >
+            <Briefcase className="nav-item-icon" size={20} />
+            <span>Manage</span>
+          </button>
+        )}
         <button
           className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveTab('settings')}

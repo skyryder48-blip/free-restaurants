@@ -169,3 +169,68 @@ export interface NUIMessage {
 }
 
 export type ViewType = 'customer' | 'employee';
+
+// Management types
+export interface Employee {
+  citizenid: string;
+  name: string;
+  grade: number;
+  gradeLabel: string;
+  online: boolean;
+  onduty: boolean;
+  hiredAt?: string;
+}
+
+export interface NearbyPlayer {
+  id: number;
+  name: string;
+  citizenid: string;
+  currentJob: string;
+  isRestaurantEmployee: boolean;
+  distance: number;
+}
+
+export interface JobGrade {
+  level: number;
+  name: string;
+  payment?: number;
+}
+
+export interface FinanceData {
+  balance: number;
+  todaySales: number;
+  weekSales: number;
+}
+
+export interface Transaction {
+  type: string;
+  amount: number;
+  description: string;
+  by: string;
+  date: string;
+}
+
+export interface PricingItem {
+  itemId: string;
+  name: string;
+  category: string;
+  basePrice: number;
+  currentPrice: number;
+}
+
+export interface StockItem {
+  name: string;
+  label: string;
+  price: number;
+  weight?: number;
+}
+
+export interface StockOrder {
+  orderId: string;
+  items: { item: string; label: string; quantity: number }[];
+  location: { label: string; coords: { x: number; y: number; z: number } };
+  status: 'pending' | 'ready' | 'completed' | 'expired';
+  cratesRemaining: number;
+  orderedByName: string;
+  createdAt: string;
+}

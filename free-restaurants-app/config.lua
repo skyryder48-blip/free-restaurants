@@ -65,6 +65,6 @@ Config.RestaurantTypes = {
 }
 
 -- Debug mode (set to true to see debug messages in F8 console)
-Config.Debug = true
+Config.Debug = false
 
 return Config
