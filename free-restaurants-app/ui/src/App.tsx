@@ -128,7 +128,16 @@ function App() {
 
 
   if (!state.isReady) {
-    return null;
+    // Show loading state instead of null (which appears as black screen)
+    return (
+      <div className="app">
+        <div className="loading-container">
+          <div className="loading-spinner"></div>
+          <p className="loading-text">Loading Food Hub...</p>
+          <p className="loading-subtext">Connecting to server</p>
+        </div>
+      </div>
+    );
   }
 
   const showViewToggle = state.access?.isEmployee && state.access?.canAccessEmployee;

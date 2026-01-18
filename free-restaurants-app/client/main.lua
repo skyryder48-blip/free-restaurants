@@ -170,6 +170,7 @@ end
 -- ============================================================================
 
 function openApp()
+    print('[Food Hub] openApp() called')
     local access = getEmployeeAccess()
     local player = getPlayerInfo()
 
@@ -180,6 +181,7 @@ function openApp()
         currentView = 'customer'
     end
 
+    print('[Food Hub] Sending appOpened event to UI, view=' .. currentView)
     -- Send initial data to UI
     sendToUI('appOpened', {
         view = currentView,
@@ -221,11 +223,24 @@ function sendToUI(event, data)
         data = data,
     }
 
+    if Config.Debug then
+        print(('[Food Hub] sendToUI event=%s phoneType=%s'):format(event, tostring(phoneType)))
+    end
+
     if phoneType == 'phone' and GetResourceState('lb-phone') == 'started' then
+        if Config.Debug then
+            print('[Food Hub] Sending via lb-phone SendCustomAppMessage')
+        end
         exports['lb-phone']:SendCustomAppMessage(Config.App.identifier, message)
     elseif phoneType == 'tablet' and GetResourceState('lb-tablet') == 'started' then
+        if Config.Debug then
+            print('[Food Hub] Sending via lb-tablet SendCustomAppMessage')
+        end
         exports['lb-tablet']:SendCustomAppMessage(Config.App.identifier, message)
     else
+        if Config.Debug then
+            print('[Food Hub] Sending via standard SendNUIMessage (fallback)')
+        end
         -- Fallback to standard NUI
         SendNUIMessage(message)
     end

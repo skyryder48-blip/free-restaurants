@@ -64,7 +64,7 @@ Config.RestaurantTypes = {
     default = { icon = 'utensils', color = '#6B7280', label = 'Restaurant' },
 }
 
--- Debug mode
-Config.Debug = false
+-- Debug mode (set to true to see debug messages in F8 console)
+Config.Debug = true
 
 return Config
