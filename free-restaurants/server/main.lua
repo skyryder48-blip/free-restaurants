@@ -490,6 +490,9 @@ exports('UpdateBusinessBalance', updateBusinessBalance)
 exports('GetPlayerRestaurantData', getPlayerRestaurantData)
 exports('SavePlayerRestaurantData', savePlayerRestaurantData)
 exports('IsInitialized', function() return isInitialized end)
+exports('GetRestaurantJobs', function() return Config.Jobs end)
+exports('GetRestaurantLocations', function() return Config.Locations end)
+exports('GetRecipes', function() return Config.Recipes end)
 
 -- ============================================================================
 -- GLOBAL TABLE
