@@ -1001,10 +1001,10 @@ openPricingMenu = function(locationKey, locationData)
 
     if pricing and next(pricing) then
         for itemId, data in pairs(pricing) do
-            local recipe = Config.Recipes[itemId]
+            local recipe = Config.Recipes and Config.Recipes.Items and Config.Recipes.Items[itemId]
             if recipe and recipe.label then
-                local currentPrice = data.price or recipe.price or 0
-                local basePrice = recipe.price or 0
+                local currentPrice = data.price or recipe.basePrice or 0
+                local basePrice = recipe.basePrice or 0
 
                 table.insert(options, {
                     title = recipe.label,
@@ -1040,7 +1040,7 @@ end
 
 --- Set price for item
 setItemPrice = function(itemId, recipe, currentData, locationKey, locationData)
-    local basePrice = recipe.price or 0
+    local basePrice = recipe.basePrice or 0
     if basePrice <= 0 then
         lib.notify({ title = 'Error', description = 'Invalid base price', type = 'error' })
         return
@@ -1177,15 +1177,21 @@ end
 --- Setup management targets
 local function setupManagementTargets()
     for restaurantType, locations in pairs(Config.Locations) do
-        if type(locations) == 'table' and restaurantType ~= 'Settings' then
+        if type(locations) == 'table' and restaurantType ~= 'Settings'
+           and restaurantType ~= 'CateringDestinations'
+           and restaurantType ~= 'DeliveryDestinations' then
             for locationId, locationData in pairs(locations) do
                 if type(locationData) == 'table' and locationData.enabled then
                     local key = ('%s_%s'):format(restaurantType, locationId)
-                    
-                    -- Boss office/management point
-                    if locationData.management then
-                        local mgmtPoint = locationData.management
-                        
+
+                    -- Boss office/management point - use 'office' config since that's what locations define
+                    local mgmtPoint = locationData.management or (locationData.office and {
+                        coords = locationData.office.computer and locationData.office.computer.coords or locationData.office.coords,
+                        heading = locationData.office.computer and locationData.office.computer.heading or 0,
+                        targetSize = locationData.office.computer and locationData.office.computer.targetSize or vec3(1.5, 1.5, 2),
+                    })
+
+                    if mgmtPoint and mgmtPoint.coords then
                         exports.ox_target:addBoxZone({
                             name = ('%s_management'):format(key),
                             coords = mgmtPoint.coords,
@@ -1207,8 +1213,9 @@ local function setupManagementTargets()
                                 },
                             },
                         })
-                        
+
                         managementTargets[('%s_management'):format(key)] = true
+                        FreeRestaurants.Utils.Debug(('Created management target: %s_management'):format(key))
                     end
                 end
             end
