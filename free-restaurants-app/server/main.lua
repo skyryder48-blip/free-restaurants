@@ -275,6 +275,7 @@ lib.callback.register('free-restaurants-app:getRestaurantMenu', function(source,
                 price = price,
                 category = category,
                 image = recipe.image,
+                available = true,
             })
 
             if not seenCategories[category] then
