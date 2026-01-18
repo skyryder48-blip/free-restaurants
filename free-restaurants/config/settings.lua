@@ -583,19 +583,57 @@ Config.Business = {
     -- Stock/Inventory Management
     Stock = {
         enabled = true,                 -- Toggle stock system
-        
+
         -- Ordering
         ordering = {
             minGradeToOrder = 2,        -- Chef+ can order stock
-            deliveryTime = 5,           -- Minutes for stock delivery
             cooldown = 30,              -- Minutes between orders
-            
+
             -- Pricing
             bulkDiscount = true,        -- Discount for large orders
             discountThreshold = 50,     -- Items needed for discount
             discountPercent = 10,       -- Percentage discount
         },
-        
+
+        -- Pickup Mission System
+        pickup = {
+            enabled = true,             -- Require pickup mission for stock orders
+            maxCrateWeight = 10000,     -- Max weight per crate in grams (10kg)
+            expiryTime = 60,            -- Minutes before pickup expires
+
+            -- Pickup Locations (random selection from these)
+            locations = {
+                {
+                    label = 'Wholesale Depot - Port',
+                    coords = vec3(863.4, -2977.5, 5.9),
+                    heading = 270.0,
+                },
+                {
+                    label = 'Food Distribution Center',
+                    coords = vec3(171.2, 6389.2, 31.4),
+                    heading = 45.0,
+                },
+                {
+                    label = 'Industrial Supply Yard',
+                    coords = vec3(-58.5, -2450.9, 6.0),
+                    heading = 140.0,
+                },
+                {
+                    label = 'Farmers Market Warehouse',
+                    coords = vec3(2222.4, 5598.6, 53.9),
+                    heading = 175.0,
+                },
+            },
+
+            -- Blip Settings
+            blip = {
+                sprite = 478,           -- Crate icon
+                color = 5,              -- Yellow
+                scale = 0.8,
+                label = 'Stock Pickup',
+            },
+        },
+
         -- Storage
         storage = {
             useOxInventory = true,      -- Use ox_inventory for storage

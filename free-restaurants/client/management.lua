@@ -1265,6 +1265,256 @@ AddEventHandler('onResourceStop', function(resourceName)
 end)
 
 -- ============================================================================
+-- STOCK PICKUP SYSTEM
+-- ============================================================================
+
+local activeStockBlips = {} -- Track pickup blips by orderId
+local stockPickupZones = {} -- Track ox_target zones for pickups
+
+--- Create blip for stock pickup
+---@param orderId string
+---@param location table
+local function createStockPickupBlip(orderId, location)
+    -- Remove existing blip if any
+    if activeStockBlips[orderId] then
+        RemoveBlip(activeStockBlips[orderId])
+    end
+
+    local blipConfig = Config.Business and Config.Business.Stock and Config.Business.Stock.pickup and Config.Business.Stock.pickup.blip or {}
+
+    local blip = AddBlipForCoord(location.coords.x, location.coords.y, location.coords.z)
+    SetBlipSprite(blip, blipConfig.sprite or 478)
+    SetBlipColour(blip, blipConfig.color or 5)
+    SetBlipScale(blip, blipConfig.scale or 0.8)
+    SetBlipAsShortRange(blip, false)
+    SetBlipRoute(blip, true)
+    SetBlipRouteColour(blip, blipConfig.color or 5)
+    BeginTextCommandSetBlipName('STRING')
+    AddTextComponentString(blipConfig.label or 'Stock Pickup')
+    EndTextCommandSetBlipName(blip)
+
+    activeStockBlips[orderId] = blip
+
+    return blip
+end
+
+--- Remove blip for stock pickup
+---@param orderId string
+local function removeStockPickupBlip(orderId)
+    if activeStockBlips[orderId] then
+        RemoveBlip(activeStockBlips[orderId])
+        activeStockBlips[orderId] = nil
+    end
+end
+
+--- Create pickup zone for stock order
+---@param orderId string
+---@param location table
+local function createStockPickupZone(orderId, location)
+    local zoneName = ('stock_pickup_%s'):format(orderId)
+
+    -- Remove existing zone if any
+    if stockPickupZones[orderId] then
+        exports.ox_target:removeZone(stockPickupZones[orderId])
+    end
+
+    exports.ox_target:addSphereZone({
+        name = zoneName,
+        coords = location.coords,
+        radius = 3.0,
+        debug = Config.Debug,
+        options = {
+            {
+                name = 'pickup_crate_' .. orderId,
+                label = 'Pickup Stock Crate',
+                icon = 'fa-solid fa-box',
+                canInteract = function()
+                    local PlayerData = exports.qbx_core:GetPlayerData()
+                    return PlayerData.job.onduty
+                end,
+                onSelect = function()
+                    -- Progress bar while picking up
+                    if lib.progressBar({
+                        duration = 3000,
+                        label = 'Picking up crate...',
+                        useWhileDead = false,
+                        canCancel = true,
+                        disable = { move = true, car = true, combat = true },
+                        anim = {
+                            dict = 'anim@heists@box_carry@',
+                            clip = 'idle',
+                        },
+                    }) then
+                        local success, remaining = lib.callback.await('free-restaurants:server:pickupStockCrate', false, orderId)
+
+                        if success then
+                            lib.notify({
+                                title = 'Crate Picked Up',
+                                description = remaining > 0 and (remaining .. ' crates remaining') or 'All crates collected!',
+                                type = 'success',
+                            })
+
+                            -- If all crates picked up, remove zone and blip
+                            if remaining == 0 then
+                                removeStockPickupBlip(orderId)
+                                if stockPickupZones[orderId] then
+                                    exports.ox_target:removeZone(stockPickupZones[orderId])
+                                    stockPickupZones[orderId] = nil
+                                end
+                            end
+                        else
+                            lib.notify({
+                                title = 'Pickup Failed',
+                                description = remaining or 'Could not pickup crate',
+                                type = 'error',
+                            })
+                        end
+                    end
+                end,
+            },
+        },
+    })
+
+    stockPickupZones[orderId] = zoneName
+end
+
+--- Remove pickup zone for stock order
+---@param orderId string
+local function removeStockPickupZone(orderId)
+    if stockPickupZones[orderId] then
+        exports.ox_target:removeZone(stockPickupZones[orderId])
+        stockPickupZones[orderId] = nil
+    end
+end
+
+-- Event: Stock order ready for pickup
+RegisterNetEvent('free-restaurants:client:stockOrderReady', function(data)
+    lib.notify({
+        title = 'Stock Order Ready',
+        description = ('%dx %s ready for pickup at %s'):format(
+            data.quantity, data.itemLabel, data.location.label
+        ),
+        type = 'inform',
+        duration = 10000,
+    })
+
+    -- Create blip and pickup zone
+    createStockPickupBlip(data.orderId, data.location)
+    createStockPickupZone(data.orderId, data.location)
+end)
+
+-- Event: Stock crate picked up (by another employee)
+RegisterNetEvent('free-restaurants:client:stockCratePickedUp', function(data)
+    lib.notify({
+        title = 'Crate Picked Up',
+        description = ('%s picked up a crate. %d remaining'):format(data.pickedUpBy, data.remaining),
+        type = 'inform',
+    })
+end)
+
+-- Event: Stock order complete (all crates picked up)
+RegisterNetEvent('free-restaurants:client:stockOrderComplete', function(data)
+    lib.notify({
+        title = 'Stock Order Complete',
+        description = ('All crates collected by %s'):format(data.pickedUpBy),
+        type = 'success',
+    })
+
+    -- Remove blip and zone
+    removeStockPickupBlip(data.orderId)
+    removeStockPickupZone(data.orderId)
+end)
+
+-- Event: Stock order expired
+RegisterNetEvent('free-restaurants:client:stockOrderExpired', function(data)
+    lib.notify({
+        title = 'Stock Order Expired',
+        description = 'A stock order was not picked up in time and has expired.',
+        type = 'error',
+    })
+
+    -- Remove blip and zone
+    removeStockPickupBlip(data.orderId)
+    removeStockPickupZone(data.orderId)
+end)
+
+--- Open stock crate (called via ox_inventory item use)
+---@param slot number Inventory slot
+local function openStockCrate(slot)
+    if lib.progressBar({
+        duration = 3000,
+        label = 'Opening crate...',
+        useWhileDead = false,
+        canCancel = true,
+        disable = { move = true, car = true, combat = true },
+        anim = {
+            dict = 'anim@heists@box_carry@',
+            clip = 'idle',
+        },
+    }) then
+        local success, result = lib.callback.await('free-restaurants:server:openStockCrate', false, slot)
+
+        if success then
+            lib.notify({
+                title = 'Crate Opened',
+                description = ('Received %dx %s'):format(result.quantity, result.label),
+                type = 'success',
+            })
+        else
+            lib.notify({
+                title = 'Failed',
+                description = result or 'Could not open crate',
+                type = 'error',
+            })
+        end
+    end
+end
+
+-- Export for ox_inventory item use
+exports('openStockCrate', function(data, slot)
+    openStockCrate(slot.slot)
+end)
+
+-- Load active stock orders on join/duty
+RegisterNetEvent('free-restaurants:client:ready', function()
+    Wait(2000) -- Wait for job data
+
+    local PlayerData = exports.qbx_core:GetPlayerData()
+    if not PlayerData or not PlayerData.job or not PlayerData.job.onduty then return end
+
+    -- Fetch active stock orders for this job
+    local orders = lib.callback.await('free-restaurants:server:getActiveStockOrders', false, PlayerData.job.name)
+
+    if orders and #orders > 0 then
+        for _, order in ipairs(orders) do
+            createStockPickupBlip(order.orderId, order.location)
+            createStockPickupZone(order.orderId, order.location)
+        end
+
+        lib.notify({
+            title = 'Pending Stock Orders',
+            description = ('%d stock orders waiting for pickup'):format(#orders),
+            type = 'inform',
+        })
+    end
+end)
+
+-- Clean up stock blips/zones on resource stop
+AddEventHandler('onResourceStop', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then return end
+
+    for orderId, blip in pairs(activeStockBlips) do
+        RemoveBlip(blip)
+    end
+    activeStockBlips = {}
+
+    for orderId, zoneName in pairs(stockPickupZones) do
+        exports.ox_target:removeZone(zoneName)
+    end
+    stockPickupZones = {}
+end)
+
+-- ============================================================================
 -- EXPORTS
 -- ============================================================================
 

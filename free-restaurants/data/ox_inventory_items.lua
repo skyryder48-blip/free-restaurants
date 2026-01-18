@@ -1238,3 +1238,21 @@
         image = 'food_poisoning_kit.png',
     },
 },
+
+-- ============================================================================
+-- STOCK CRATES (Stock order pickup containers)
+-- ============================================================================
+
+['stock_crate'] = {
+    label = 'Stock Crate',
+    weight = 500, -- Base weight, actual weight determined by contents
+    stack = false,
+    close = false,
+    description = 'A sealed crate containing restaurant supplies. Use to open and retrieve contents.',
+    client = {
+        image = 'stock_crate.png',
+        usetime = 3000,
+        anim = { dict = 'anim@heists@box_carry@', clip = 'idle' },
+        export = 'free-restaurants.openStockCrate',
+    },
+},

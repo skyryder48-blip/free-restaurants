@@ -67,7 +67,7 @@ end
 -- UTILITY FUNCTIONS
 -- ============================================================================
 
---- Get location menu for kiosk/register
+--- Get location menu for kiosk/register with custom pricing
 ---@param locationData table Location configuration
 ---@return table menu, table categories
 local function getLocationMenu(locationData)
@@ -75,6 +75,13 @@ local function getLocationMenu(locationData)
     local categories = {}
     local seenCategories = {}
     local restaurantType = locationData.restaurantType
+    local job = locationData.job
+
+    -- Fetch custom prices from server
+    local customPrices = {}
+    if job then
+        customPrices = lib.callback.await('free-restaurants:server:getPricing', false, job) or {}
+    end
 
     -- Recipes are stored in Config.Recipes.Items, not Config.Recipes directly
     local recipesTable = Config.Recipes and Config.Recipes.Items or {}
@@ -99,11 +106,17 @@ local function getLocationMenu(locationData)
                 category = recipeData.categories[1]
             end
 
+            -- Use custom price if available, otherwise base price
+            local price = recipeData.basePrice or 0
+            if customPrices[recipeId] and customPrices[recipeId].price then
+                price = customPrices[recipeId].price
+            end
+
             table.insert(menu, {
                 id = recipeId,
                 label = recipeData.label,
                 description = recipeData.description or '',
-                price = recipeData.basePrice or recipeData.price or 0,  -- Use basePrice (recipes use this)
+                price = price,
                 category = category,
                 icon = recipeData.icon,
                 customizations = recipeData.customizations,
