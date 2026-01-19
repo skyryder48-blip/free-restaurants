@@ -707,6 +707,8 @@ end)
 
 local activeDeliveryBlip = nil
 local activeDeliveryData = nil
+local activeDeliveryCoords = nil
+local deliveryArrivalRadius = 15.0 -- Distance in meters to trigger arrival
 
 -- Start delivery - set GPS waypoint
 RegisterNetEvent('free-restaurants-app:startDelivery', function(data)
@@ -731,6 +733,9 @@ RegisterNetEvent('free-restaurants-app:startDelivery', function(data)
         })
         return
     end
+
+    -- Store coords for proximity check
+    activeDeliveryCoords = coords
 
     -- Remove old blip if exists
     if activeDeliveryBlip then
@@ -767,6 +772,72 @@ RegisterNetEvent('free-restaurants-app:startDelivery', function(data)
     end
 end)
 
+-- Monitor delivery arrival
+CreateThread(function()
+    while true do
+        Wait(1000) -- Check every second
+
+        if activeDeliveryCoords and activeDeliveryData then
+            local playerCoords = GetEntityCoords(PlayerPedId())
+            local distance = #(playerCoords - activeDeliveryCoords)
+
+            if distance <= deliveryArrivalRadius then
+                -- Player has arrived at delivery location
+                lib.notify({
+                    title = 'Delivery Location',
+                    description = 'Press [E] to complete delivery',
+                    type = 'inform',
+                    duration = 5000,
+                })
+
+                -- Wait for player to press E or leave area
+                while activeDeliveryCoords and activeDeliveryData do
+                    Wait(0)
+                    local currentCoords = GetEntityCoords(PlayerPedId())
+                    local currentDistance = #(currentCoords - activeDeliveryCoords)
+
+                    -- Draw marker at delivery location
+                    DrawMarker(1, activeDeliveryCoords.x, activeDeliveryCoords.y, activeDeliveryCoords.z - 1.0,
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                        2.0, 2.0, 1.0,
+                        50, 205, 50, 100, -- Green color
+                        false, true, 2, false, nil, nil, false)
+
+                    -- Show help text
+                    BeginTextCommandDisplayHelp('STRING')
+                    AddTextComponentSubstringPlayerName('Press ~INPUT_CONTEXT~ to complete delivery')
+                    EndTextCommandDisplayHelp(0, false, true, -1)
+
+                    if IsControlJustPressed(0, 38) then -- E key
+                        -- Complete the delivery
+                        TriggerServerEvent('free-restaurants-app:server:completeDelivery', activeDeliveryData.orderId)
+
+                        -- Clear local state
+                        if activeDeliveryBlip then
+                            RemoveBlip(activeDeliveryBlip)
+                            activeDeliveryBlip = nil
+                        end
+                        activeDeliveryData = nil
+                        activeDeliveryCoords = nil
+
+                        lib.notify({
+                            title = 'Delivery Complete',
+                            description = 'Order delivered successfully!',
+                            type = 'success',
+                        })
+                        break
+                    end
+
+                    -- If player leaves area, go back to monitoring
+                    if currentDistance > deliveryArrivalRadius + 5.0 then
+                        break
+                    end
+                end
+            end
+        end
+    end
+end)
+
 -- Complete delivery - triggered when driver reaches destination
 RegisterNetEvent('free-restaurants-app:completeDelivery', function(orderId)
     if activeDeliveryBlip then
@@ -774,6 +845,7 @@ RegisterNetEvent('free-restaurants-app:completeDelivery', function(orderId)
         activeDeliveryBlip = nil
     end
     activeDeliveryData = nil
+    activeDeliveryCoords = nil
 
     lib.notify({
         title = 'Delivery Complete',
@@ -789,6 +861,26 @@ RegisterNetEvent('free-restaurants-app:clearDelivery', function()
         activeDeliveryBlip = nil
     end
     activeDeliveryData = nil
+    activeDeliveryCoords = nil
+end)
+
+-- Staff message notification (fallback when lb-phone not available)
+RegisterNetEvent('free-restaurants-app:staffMessage', function(data)
+    -- Get restaurant name
+    local restaurantJobs = exports['free-restaurants']:GetRestaurantJobs()
+    local restaurantName = restaurantJobs and restaurantJobs[data.restaurantJob] and
+        restaurantJobs[data.restaurantJob].label or data.restaurantJob
+
+    lib.notify({
+        title = ('Message from %s'):format(restaurantName),
+        description = ('%s: %s'):format(data.staffName or 'Staff', data.message),
+        type = 'inform',
+        duration = 10000,
+        icon = 'comment',
+    })
+
+    -- Play notification sound
+    PlaySoundFrontend(-1, 'Text_Arrive_Tone', 'Phone_SoundSet_Default', true)
 end)
 
 -- ============================================================================

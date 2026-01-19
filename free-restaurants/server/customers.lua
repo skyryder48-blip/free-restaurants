@@ -260,10 +260,14 @@ local function updateOrderStatus(orderId, status, employeeSource)
         -- Notify customer their order is ready
         notifyCustomer(order.customerSource, 'order_ready', order)
     end
-    
+
     -- Notify staff of status change
     notifyStaff(order.job, 'order_update', order)
-    
+
+    -- Trigger KDS status changed event for app integration
+    -- This allows the Food Hub app to track order status updates
+    TriggerEvent('free-restaurants:kds:orderStatusChanged', orderId, status)
+
     return true
 end
 

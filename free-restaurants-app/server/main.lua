@@ -302,15 +302,30 @@ lib.callback.register('free-restaurants-app:placeOrder', function(source, data)
     local job = data.restaurantId
     local status = restaurantStatus[job]
 
-    if not status or not status.open then
+    -- Check if staff are on duty (same logic as getOpenRestaurants)
+    local hasStaff = false
+    local players = exports.qbx_core:GetQBPlayers()
+    for _, p in pairs(players) do
+        if p.PlayerData.job.name == job and p.PlayerData.job.onduty then
+            hasStaff = true
+            break
+        end
+    end
+
+    -- Restaurant is open if explicitly set OR has staff on duty
+    local isOpen = (status and status.open) or hasStaff
+    local acceptsPickup = (status and status.acceptsPickup) or hasStaff
+    local acceptsDelivery = status and status.acceptsDelivery or false
+
+    if not isOpen then
         return { success = false, error = 'Restaurant is closed' }
     end
 
-    if data.orderType == 'pickup' and not status.acceptsPickup then
+    if data.orderType == 'pickup' and not acceptsPickup then
         return { success = false, error = 'Pickup not available' }
     end
 
-    if data.orderType == 'delivery' and not status.acceptsDelivery then
+    if data.orderType == 'delivery' and not acceptsDelivery then
         return { success = false, error = 'Delivery not available' }
     end
 
@@ -747,20 +762,90 @@ end)
 --- Message customer
 lib.callback.register('free-restaurants-app:messageCustomer', function(source, data)
     local order = activeAppOrders[data.orderId]
-    if not order or not order.customerPhone then
-        return { success = false, error = 'Order or phone not found' }
+    if not order then
+        return { success = false, error = 'Order not found' }
     end
 
-    -- Send SMS via lb-phone
-    if GetResourceState('lb-phone') == 'started' then
-        local player = exports.qbx_core:GetPlayer(source)
-        if player then
-            exports['lb-phone']:SendMessage(player.PlayerData.charinfo.phone, order.customerPhone, data.message)
-            return { success = true }
-        end
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then
+        return { success = false, error = 'Player not found' }
     end
 
-    return { success = false, error = 'Could not send message' }
+    local staffName = ('%s %s'):format(
+        player.PlayerData.charinfo.firstname,
+        player.PlayerData.charinfo.lastname
+    )
+
+    -- Try to send SMS via lb-phone first
+    if GetResourceState('lb-phone') == 'started' and order.customerPhone then
+        exports['lb-phone']:SendMessage(player.PlayerData.charinfo.phone, order.customerPhone, data.message)
+        return { success = true, method = 'sms' }
+    end
+
+    -- Fallback: Send in-game notification to customer
+    local sent = notifyCustomer(order.customerCitizenid, 'free-restaurants-app:staffMessage', {
+        orderId = order.orderId,
+        staffName = staffName,
+        message = data.message,
+        restaurantJob = order.job,
+    })
+
+    if sent then
+        return { success = true, method = 'notification' }
+    end
+
+    return { success = false, error = 'Customer is offline' }
+end)
+
+--- Complete delivery (triggered by driver arriving at destination)
+RegisterNetEvent('free-restaurants-app:server:completeDelivery', function(orderId)
+    local source = source
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player then return end
+
+    local order = activeAppOrders[orderId]
+    if not order then
+        print(('[Food Hub] completeDelivery: Order %s not found'):format(orderId))
+        return
+    end
+
+    -- Verify this player is the assigned driver
+    if order.assignedTo ~= player.PlayerData.citizenid then
+        lib.notify(source, {
+            title = 'Error',
+            description = 'This delivery is not assigned to you',
+            type = 'error',
+        })
+        return
+    end
+
+    -- Mark order as delivered
+    order.status = 'delivered'
+    order.completedAt = GetGameTimer()
+
+    -- Update database
+    MySQL.update.await([[
+        UPDATE restaurant_app_orders SET status = 'delivered', completed_at = NOW() WHERE order_id = ?
+    ]], { orderId })
+
+    -- Calculate and pay delivery earnings
+    local deliveryEarnings = order.deliveryFee or 0
+    if deliveryEarnings > 0 then
+        player.Functions.AddMoney('cash', deliveryEarnings, 'food-hub-delivery')
+    end
+
+    -- Notify customer
+    notifyCustomer(order.customerCitizenid, 'free-restaurants-app:orderStatusUpdate', {
+        orderId = orderId,
+        status = 'delivered',
+    })
+
+    -- Notify the driver
+    TriggerClientEvent('free-restaurants-app:completeDelivery', source, orderId)
+
+    print(('[Food Hub] Delivery %s completed by %s, earned $%d'):format(
+        orderId, player.PlayerData.citizenid, deliveryEarnings
+    ))
 end)
 
 -- ============================================================================
@@ -774,9 +859,12 @@ RegisterNetEvent('free-restaurants:kds:orderStatusChanged', function(orderId, ne
 
     -- Map KDS status to app status
     local statusMap = {
+        ['pending'] = 'pending',
+        ['in_progress'] = 'preparing',
         ['preparing'] = 'preparing',
         ['ready'] = 'ready',
         ['completed'] = order.orderType == 'pickup' and 'picked_up' or 'delivered',
+        ['delivered'] = 'delivered',
         ['cancelled'] = 'cancelled',
     }
 
@@ -794,6 +882,8 @@ RegisterNetEvent('free-restaurants:kds:orderStatusChanged', function(orderId, ne
             orderId = orderId,
             status = appStatus,
         })
+
+        print(('[Food Hub] Order %s status updated to %s (from KDS: %s)'):format(orderId, appStatus, newStatus))
     end
 end)
 
