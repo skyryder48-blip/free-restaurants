@@ -892,10 +892,69 @@ local function getDeliveryOrder(deliveryId)
 end
 
 -- ============================================================================
+-- KDS ORDER CREATION (for app orders)
+-- ============================================================================
+
+--- Create a KDS order (for app orders that have already been paid)
+--- This adds the order to the KDS queue without payment processing
+---@param data table { orderId, job, items, orderType, customerName, source }
+---@return boolean success
+---@return string|nil orderId
+local function createKDSOrder(data)
+    if not data or not data.orderId or not data.job then
+        print('[free-restaurants] createKDSOrder: Missing required data (orderId or job)')
+        return false, nil
+    end
+
+    -- Build items with labels if not present
+    local items = {}
+    for _, item in ipairs(data.items or {}) do
+        table.insert(items, {
+            id = item.id or item.name,
+            label = item.label or item.name or item.id,
+            amount = item.quantity or item.amount or 1,
+            price = item.price or 0,
+        })
+    end
+
+    -- Create order record for KDS
+    local orderData = {
+        id = data.orderId,
+        job = data.job,
+        locationKey = data.locationKey or data.job,
+        customerId = data.customerCitizenid or 'APP_ORDER',
+        customerName = data.customerName or 'App Customer',
+        customerSource = nil, -- No source for app orders
+        items = items,
+        subtotal = 0,
+        tax = 0,
+        total = 0,
+        tip = 0,
+        status = 'pending',
+        createdAt = os.time(),
+        paymentMethod = 'app',
+        isAppOrder = true,
+        orderType = data.orderType or 'pickup',
+        source = data.source or 'app',
+    }
+
+    -- Store in memory
+    activeOrders[data.orderId] = orderData
+
+    -- Notify restaurant staff
+    notifyStaff(data.job, 'new_order', orderData)
+
+    print(('[free-restaurants] App order #%s added to KDS for %s'):format(data.orderId, data.job))
+
+    return true, data.orderId
+end
+
+-- ============================================================================
 -- EXPORTS
 -- ============================================================================
 
 exports('CreateOrder', createOrder)
+exports('CreateKDSOrder', createKDSOrder)
 exports('UpdateOrderStatus', updateOrderStatus)
 exports('CompleteOrder', completeOrder)
 exports('CancelOrder', cancelOrder)
