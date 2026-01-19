@@ -642,7 +642,7 @@ lib.callback.register('free-restaurants-app:handleAppOrder', function(source, da
     if data.action == 'accept' then
         order.status = 'accepted'
 
-        -- Send to KDS
+        -- Send to KDS with delivery coords for delivery orders
         exports['free-restaurants']:CreateKDSOrder({
             orderId = order.orderId,
             job = order.job,
@@ -650,6 +650,8 @@ lib.callback.register('free-restaurants-app:handleAppOrder', function(source, da
             orderType = order.orderType == 'delivery' and 'delivery' or 'takeout',
             customerName = order.customerName,
             customerCitizenid = order.customerCitizenid,
+            customerSource = nil, -- App orders don't have a source
+            deliveryCoords = order.deliveryCoords, -- Customer location for delivery
             source = 'app',
         })
 
@@ -797,7 +799,7 @@ lib.callback.register('free-restaurants-app:messageCustomer', function(source, d
     return { success = false, error = 'Customer is offline' }
 end)
 
---- Complete delivery (triggered by driver arriving at destination)
+--- Complete delivery (triggered by driver confirming delivery in app)
 RegisterNetEvent('free-restaurants-app:server:completeDelivery', function(orderId)
     local source = source
     local player = exports.qbx_core:GetPlayer(source)
@@ -811,7 +813,7 @@ RegisterNetEvent('free-restaurants-app:server:completeDelivery', function(orderI
 
     -- Verify this player is the assigned driver
     if order.assignedTo ~= player.PlayerData.citizenid then
-        lib.notify(source, {
+        TriggerClientEvent('ox_lib:notify', source, {
             title = 'Error',
             description = 'This delivery is not assigned to you',
             type = 'error',
@@ -828,11 +830,10 @@ RegisterNetEvent('free-restaurants-app:server:completeDelivery', function(orderI
         UPDATE restaurant_app_orders SET status = 'delivered', completed_at = NOW() WHERE order_id = ?
     ]], { orderId })
 
-    -- Calculate and pay delivery earnings
-    local deliveryEarnings = order.deliveryFee or 0
-    if deliveryEarnings > 0 then
-        player.Functions.AddMoney('cash', deliveryEarnings, 'food-hub-delivery')
-    end
+    -- No payment to driver - tips handled through roleplay
+
+    -- Also update the main restaurant KDS order status
+    exports['free-restaurants']:UpdateOrderStatus(orderId, 'delivered', source)
 
     -- Notify customer
     notifyCustomer(order.customerCitizenid, 'free-restaurants-app:orderStatusUpdate', {
@@ -853,7 +854,7 @@ end)
 -- ============================================================================
 
 -- Listen for KDS status updates
-RegisterNetEvent('free-restaurants:kds:orderStatusChanged', function(orderId, newStatus)
+RegisterNetEvent('free-restaurants:kds:orderStatusChanged', function(orderId, newStatus, extraData)
     local order = activeAppOrders[orderId]
     if not order then return end
 
@@ -863,6 +864,7 @@ RegisterNetEvent('free-restaurants:kds:orderStatusChanged', function(orderId, ne
         ['in_progress'] = 'preparing',
         ['preparing'] = 'preparing',
         ['ready'] = 'ready',
+        ['out_for_delivery'] = 'on_the_way',
         ['completed'] = order.orderType == 'pickup' and 'picked_up' or 'delivered',
         ['delivered'] = 'delivered',
         ['cancelled'] = 'cancelled',
@@ -871,6 +873,15 @@ RegisterNetEvent('free-restaurants:kds:orderStatusChanged', function(orderId, ne
     local appStatus = statusMap[newStatus]
     if appStatus then
         order.status = appStatus
+
+        -- Track delivery start time and driver for timeout
+        if newStatus == 'out_for_delivery' then
+            order.deliveryStartedAt = os.time()
+            -- Set the assigned driver from the extra data
+            if extraData and extraData.driverCitizenid then
+                order.assignedTo = extraData.driverCitizenid
+            end
+        end
 
         -- Update database
         MySQL.update.await([[
@@ -898,6 +909,98 @@ end)
 exports('IsRestaurantOpen', function(job)
     local status = restaurantStatus[job]
     return status and status.open or false
+end)
+
+-- ============================================================================
+-- DELIVERY TIMEOUT CLEANUP
+-- ============================================================================
+
+local DELIVERY_TIMEOUT_MINUTES = 10
+
+--- Cancel a delivery due to timeout and refund customer
+---@param orderId string
+local function cancelDeliveryTimeout(orderId)
+    local order = activeAppOrders[orderId]
+    if not order then return end
+
+    print(('[Food Hub] Delivery timeout for order %s - refunding customer'):format(orderId))
+
+    -- Refund the customer
+    local players = exports.qbx_core:GetQBPlayers()
+    for _, p in pairs(players) do
+        if p.PlayerData.citizenid == order.customerCitizenid then
+            p.Functions.AddMoney('bank', order.total, 'food-hub-delivery-timeout-refund')
+
+            TriggerClientEvent('ox_lib:notify', p.PlayerData.source, {
+                title = 'Delivery Failed',
+                description = ('Order #%s could not be delivered. You have been refunded $%d.'):format(orderId, order.total),
+                type = 'error',
+                duration = 10000,
+            })
+            break
+        end
+    end
+
+    -- Deduct from business account
+    exports['free-restaurants']:UpdateBusinessBalance(
+        order.job,
+        -order.total,
+        'refund',
+        ('Delivery Timeout Refund - #%s'):format(orderId),
+        nil
+    )
+
+    -- Notify the driver if online
+    if order.assignedTo then
+        for _, p in pairs(players) do
+            if p.PlayerData.citizenid == order.assignedTo then
+                TriggerClientEvent('ox_lib:notify', p.PlayerData.source, {
+                    title = 'Delivery Expired',
+                    description = ('Order #%s delivery timed out and has been cancelled.'):format(orderId),
+                    type = 'error',
+                    duration = 10000,
+                })
+
+                -- Clear the driver's delivery blip
+                TriggerClientEvent('free-restaurants-app:clearDelivery', p.PlayerData.source)
+                break
+            end
+        end
+    end
+
+    -- Update order status
+    order.status = 'cancelled'
+
+    -- Update database
+    MySQL.update.await([[
+        UPDATE restaurant_app_orders SET status = 'cancelled' WHERE order_id = ?
+    ]], { orderId })
+
+    -- Also cancel in main restaurant KDS
+    exports['free-restaurants']:CancelOrder(orderId, 'Delivery timeout', false)
+
+    -- Remove from active orders
+    activeAppOrders[orderId] = nil
+end
+
+-- Cleanup thread for expired deliveries
+CreateThread(function()
+    while true do
+        Wait(60000) -- Check every minute
+
+        local currentTime = os.time()
+        local timeoutSeconds = DELIVERY_TIMEOUT_MINUTES * 60
+
+        for orderId, order in pairs(activeAppOrders) do
+            -- Check if order is out for delivery and has timed out
+            if order.status == 'on_the_way' and order.deliveryStartedAt then
+                local elapsed = currentTime - order.deliveryStartedAt
+                if elapsed > timeoutSeconds then
+                    cancelDeliveryTimeout(orderId)
+                end
+            end
+        end
+    end
 end)
 
 print('[Food Hub] server/main.lua loaded')

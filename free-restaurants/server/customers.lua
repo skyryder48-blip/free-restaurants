@@ -507,10 +507,10 @@ end
 ---@param data table
 notifyCustomer = function(customerSource, eventType, data)
     if not customerSource then return end
-    
+
     local player = exports.qbx_core:GetPlayer(customerSource)
     if not player then return end
-    
+
     if eventType == 'order_ready' then
         TriggerClientEvent('ox_lib:notify', customerSource, {
             title = 'Order Ready',
@@ -519,8 +519,18 @@ notifyCustomer = function(customerSource, eventType, data)
             icon = 'bell',
             duration = 10000,
         })
-        
+
         TriggerClientEvent('free-restaurants:client:orderReady', customerSource, data)
+    elseif eventType == 'order_out_for_delivery' then
+        TriggerClientEvent('ox_lib:notify', customerSource, {
+            title = 'Order On The Way',
+            description = ('Order #%s is out for delivery!'):format(data.id),
+            type = 'success',
+            icon = 'truck',
+            duration = 10000,
+        })
+
+        TriggerClientEvent('free-restaurants:client:orderOutForDelivery', customerSource, data)
     end
 end
 
@@ -629,6 +639,57 @@ end)
 --- Mark order as ready
 lib.callback.register('free-restaurants:server:readyOrder', function(source, orderId)
     return updateOrderStatus(orderId, 'ready', source)
+end)
+
+--- Start delivery (driver takes order out for delivery)
+lib.callback.register('free-restaurants:server:startDelivery', function(source, orderId)
+    local order = activeOrders[orderId]
+    if not order then return false, nil end
+
+    -- Verify order is ready and is a delivery
+    if order.status ~= 'ready' then
+        return false, nil
+    end
+
+    if order.orderType ~= 'delivery' then
+        return false, nil
+    end
+
+    -- Verify employee
+    local player = exports.qbx_core:GetPlayer(source)
+    if not player or player.PlayerData.job.name ~= order.job then
+        return false, nil
+    end
+
+    -- Assign driver and update status
+    order.status = 'out_for_delivery'
+    order.deliveryDriverSource = source
+    order.deliveryDriverCitizenid = player.PlayerData.citizenid
+    order.deliveryStartedAt = os.time()
+    order.updatedAt = os.time()
+
+    -- Update database
+    MySQL.update.await([[
+        UPDATE restaurant_orders SET status = 'out_for_delivery', employee_citizenid = ? WHERE id = ?
+    ]], { player.PlayerData.citizenid, orderId })
+
+    -- Notify customer their order is on the way
+    notifyCustomer(order.customerSource, 'order_out_for_delivery', order)
+
+    -- Trigger KDS status changed event for app integration
+    -- Include driver info so app can set assignedTo
+    TriggerEvent('free-restaurants:kds:orderStatusChanged', orderId, 'out_for_delivery', {
+        driverCitizenid = player.PlayerData.citizenid,
+        driverSource = source,
+    })
+
+    print(('[free-restaurants] Delivery started for order #%s by %s'):format(orderId, player.PlayerData.citizenid))
+
+    -- Return delivery data including customer coords
+    return true, {
+        deliveryCoords = order.deliveryCoords or order.customerCoords,
+        customerName = order.customerName,
+    }
 end)
 
 --- Complete order (staff side)
@@ -928,7 +989,7 @@ local function createKDSOrder(data)
         locationKey = data.locationKey or data.job,
         customerId = data.customerCitizenid or 'APP_ORDER',
         customerName = data.customerName or 'App Customer',
-        customerSource = nil, -- No source for app orders
+        customerSource = data.customerSource, -- May be nil for app orders
         items = items,
         subtotal = 0,
         tax = 0,
@@ -939,6 +1000,7 @@ local function createKDSOrder(data)
         paymentMethod = 'app',
         isAppOrder = true,
         orderType = data.orderType or 'pickup',
+        deliveryCoords = data.deliveryCoords, -- Customer location for delivery orders
         source = data.source or 'app',
     }
 

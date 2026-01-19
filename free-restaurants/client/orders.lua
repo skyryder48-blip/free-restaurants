@@ -27,6 +27,7 @@ local ORDER_STATUS = {
     PENDING = 'pending',
     IN_PROGRESS = 'in_progress',
     READY = 'ready',
+    OUT_FOR_DELIVERY = 'out_for_delivery',
     DELIVERED = 'delivered',
     CANCELLED = 'cancelled',
 }
@@ -36,6 +37,7 @@ local openKDS
 local closeKDS
 local openOrderDetails
 local refreshKDS
+local startDelivery
 
 -- ============================================================================
 -- ORDER MANAGEMENT
@@ -228,6 +230,66 @@ local function completeOrder(orderId)
         if kdsVisible then
             refreshKDS()
         end
+    end
+end
+
+--- Start delivery for a delivery order
+---@param orderId string Order ID
+function startDelivery(orderId)
+    local order = activeOrders[orderId]
+    if not order then return end
+
+    if order.status ~= ORDER_STATUS.READY then
+        lib.notify({
+            title = 'Invalid Status',
+            description = 'This order is not ready for delivery.',
+            type = 'error',
+        })
+        return
+    end
+
+    if order.orderType ~= 'delivery' then
+        lib.notify({
+            title = 'Not a Delivery',
+            description = 'This is not a delivery order.',
+            type = 'error',
+        })
+        return
+    end
+
+    -- Start delivery on server
+    local success, deliveryData = lib.callback.await('free-restaurants:server:startDelivery', false, orderId)
+
+    if success then
+        updateOrderStatus(orderId, ORDER_STATUS.OUT_FOR_DELIVERY, {
+            deliveryStartedAt = GetGameTimer(),
+        })
+
+        lib.notify({
+            title = 'Delivery Started',
+            description = ('Delivering order #%s - GPS has been set'):format(orderId),
+            type = 'success',
+        })
+
+        -- Trigger the delivery tracking on client (will show blip)
+        if deliveryData then
+            TriggerEvent('free-restaurants-app:startDelivery', {
+                orderId = orderId,
+                customerName = order.customerName,
+                deliveryCoords = deliveryData.deliveryCoords,
+            })
+        end
+
+        -- Update KDS
+        if kdsVisible then
+            refreshKDS()
+        end
+    else
+        lib.notify({
+            title = 'Failed',
+            description = 'Could not start delivery.',
+            type = 'error',
+        })
     end
 end
 
@@ -449,13 +511,32 @@ function openOrderDetails(orderId)
             end,
         })
     elseif order.status == ORDER_STATUS.READY then
+        -- Check if this is a delivery order
+        if order.orderType == 'delivery' then
+            table.insert(options, {
+                title = 'Start Delivery',
+                description = 'Begin delivery to customer',
+                icon = 'truck',
+                onSelect = function()
+                    startDelivery(orderId)
+                end,
+            })
+        else
+            table.insert(options, {
+                title = 'Complete Order',
+                description = 'Hand order to customer',
+                icon = 'hand-holding',
+                onSelect = function()
+                    completeOrder(orderId)
+                end,
+            })
+        end
+    elseif order.status == ORDER_STATUS.OUT_FOR_DELIVERY then
         table.insert(options, {
-            title = 'Complete Order',
-            description = 'Hand order to customer',
-            icon = 'hand-holding',
-            onSelect = function()
-                completeOrder(orderId)
-            end,
+            title = 'Out for Delivery',
+            description = 'Driver is delivering this order',
+            icon = 'truck',
+            disabled = true,
         })
     end
     
