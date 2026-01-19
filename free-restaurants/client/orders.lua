@@ -31,6 +31,12 @@ local ORDER_STATUS = {
     CANCELLED = 'cancelled',
 }
 
+-- Forward declarations for functions used before definition
+local openKDS
+local closeKDS
+local openOrderDetails
+local refreshKDS
+
 -- ============================================================================
 -- ORDER MANAGEMENT
 -- ============================================================================
@@ -378,7 +384,7 @@ end
 
 --- Open order details
 ---@param orderId string Order ID
-local function openOrderDetails(orderId)
+function openOrderDetails(orderId)
     local order = activeOrders[orderId]
     if not order then return end
     
@@ -481,7 +487,7 @@ local function openOrderDetails(orderId)
 end
 
 --- Open KDS display
-local function openKDS()
+function openKDS()
     if not FreeRestaurants.Client.IsOnDuty() then
         lib.notify({
             title = 'Not On Duty',
@@ -503,7 +509,7 @@ local function openKDS()
 end
 
 --- Refresh KDS display
-local function refreshKDS()
+function refreshKDS()
     if not kdsVisible then return end
     
     lib.registerContext({
@@ -516,7 +522,7 @@ local function refreshKDS()
 end
 
 --- Close KDS
-local function closeKDS()
+function closeKDS()
     kdsVisible = false
     lib.hideContext()
 end

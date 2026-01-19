@@ -630,9 +630,11 @@ lib.callback.register('free-restaurants-app:handleAppOrder', function(source, da
         -- Send to KDS
         exports['free-restaurants']:CreateKDSOrder({
             orderId = order.orderId,
+            job = order.job,
             items = order.items,
             orderType = order.orderType == 'delivery' and 'delivery' or 'takeout',
             customerName = order.customerName,
+            customerCitizenid = order.customerCitizenid,
             source = 'app',
         })
 
